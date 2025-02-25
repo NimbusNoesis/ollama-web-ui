@@ -8,7 +8,7 @@
       "program": "${workspaceFolder}/.venv/Lib/site-packages/streamlit/web/cli.py",
       "args": [
         "run",
-        "${file}",
+        "${workspaceFolder}/main.py",
         "--server.port=8501",
         "--server.headless=true"
       ],

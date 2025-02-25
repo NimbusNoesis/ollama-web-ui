@@ -1,13 +1,28 @@
-# Ollama Model Manager
+# Ollama UI
 
-A Streamlit-based web application for managing your Ollama models. This dashboard provides an intuitive interface to browse, search, download, and manage local AI models through Ollama.
+A comprehensive UI for Ollama, providing model management, chat capabilities, and model comparison features.
 
 ## Features
 
-- **Model Management**: View, download, and delete Ollama models
-- **Model Details**: Examine model information, including parameters, templates, and system prompts
-- **Model Search**: Search for available models by keywords or categories
-- **Real-time Downloads**: Track download progress with visual indicators
+### Model Management
+
+- **Browse Models**: View all installed models with size and modification date
+- **Model Details**: Examine detailed information about models, including parameters, templates, and system prompts
+- **Search Models**: Find and install models from the Ollama library
+- **Download Progress**: Track model download progress with visual indicators
+
+### Chat Interface
+
+- **Full Chat Capabilities**: Chat with any installed Ollama model
+- **Conversation Management**: Save, load, and delete conversations
+- **Custom Settings**: Adjust temperature and system prompts for each chat
+- **Persistent Storage**: All chats are saved as JSON files for easy access
+
+### Model Comparison
+
+- **Compare Multiple Models**: Run the same prompt against multiple models side by side
+- **Visual Comparison**: Easily compare responses from different models
+- **Customizable**: Select any combination of installed models to compare
 
 ## Requirements
 
@@ -15,7 +30,7 @@ A Streamlit-based web application for managing your Ollama models. This dashboar
 - Streamlit
 - Pandas
 - Ollama (running locally)
-- Additional Python libraries: time, re, logging
+- Additional Python libraries: requests, json, datetime, markdown
 
 ## Installation
 
@@ -23,50 +38,40 @@ A Streamlit-based web application for managing your Ollama models. This dashboar
 2. Clone this repository
 3. Install the required Python packages:
 
-   ```bash
-   pip install streamlit pandas ollama
-   ```
+```bash
+pip install -r requirements.txt
+```
 
 ## Usage
 
 1. Start the Ollama service on your machine
 2. Run the application:
 
-   ```bash
-   streamlit run main.py
-   ```
+```bash
+streamlit run main.py
+```
 
 3. Open your browser and navigate to the URL displayed in the terminal (typically <http://localhost:8501>)
 
-## Application Sections
+## Application Structure
 
-### Models List
+The application is structured in a modular way for better maintainability:
 
-The main dashboard shows all installed models with their size and last modified date. You can:
+- `app/api`: API interaction with Ollama
+- `app/components`: Reusable UI components
+- `app/pages`: Different pages of the application
+- `app/utils`: Utility functions and classes
+- `app/data`: Data storage (chats)
 
-- View details of any model
-- Delete models (with confirmation)
+## Contributing
 
-### Model Details
+Contributions are welcome! Please feel free to submit a Pull Request.
 
-Shows detailed information about selected models, including:
+## License
 
-- Basic information (family, parameter size, quantization level)
-- System prompt
-- Template format
-- Model parameters
-- License information
+This project is licensed under the MIT License - see the LICENSE file for details.
 
-### Search
+## Acknowledgments
 
-Find new models to download:
-
-- Search by keywords
-- Filter by category (Code, Vision, Small, Medium, Large)
-- Pull (download) models directly from the search interface
-
-## Notes
-
-- The application requires Ollama to be running locally
-- Model search results are from a preset catalog and may not include all available models
-- The application will display appropriate error messages if Ollama is not accessible
+- Built with [Streamlit](https://streamlit.io/)
+- Powered by [Ollama](https://ollama.com/)
