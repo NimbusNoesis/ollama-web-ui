@@ -172,5 +172,3 @@ cython_debug/
 
 app/data/chats/*
 app/data/logs/*
-
-tools/*
