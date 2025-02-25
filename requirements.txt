@@ -1,4 +1,6 @@
 streamlit
 requests
-panda
+pandas
 ollama
+datetime
+markdown

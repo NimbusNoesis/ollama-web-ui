@@ -1,0 +1,18 @@
+{
+  "id": "20250224_195404",
+  "title": "Chat 20250224_195404",
+  "created_at": "2025-02-24T19:54:04.056498",
+  "updated_at": "2025-02-24T19:54:04.531563",
+  "messages": [
+    {
+      "role": "user",
+      "content": "hello",
+      "timestamp": "2025-02-24T19:54:04.057049"
+    },
+    {
+      "role": "assistant",
+      "content": "Hello! It's nice to meet you. Is there something I can help you with, or would you like to chat?",
+      "timestamp": "2025-02-24T19:54:04.531478"
+    }
+  ]
+}
