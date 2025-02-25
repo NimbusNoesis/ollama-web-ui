@@ -164,7 +164,9 @@ class ChatUI:
         # Button row below input
         col1, col2, col3 = st.columns([1, 1, 1])
         with col1:
-            if st.button("Clear Chat", disabled=st.session_state.thinking):
+            if st.button(
+                "Clear Chat", disabled=st.session_state.thinking, key="btn_clear_chat"
+            ):
                 st.session_state.messages = []
 
         with col3:
@@ -178,7 +180,10 @@ class ChatUI:
                     st.session_state.user_input = ""
 
             if st.button(
-                "Submit", disabled=st.session_state.thinking, on_click=submit_and_clear
+                "Submit",
+                disabled=st.session_state.thinking,
+                on_click=submit_and_clear,
+                key="btn_submit",
             ):
                 pass
                 # The actual submission is handled in the on_click callback

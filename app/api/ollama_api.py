@@ -1,8 +1,10 @@
 import re
 import time
-from typing import Any, Dict, Generator, List, Optional, TypedDict, Union
+from typing import Any, Dict, Generator, List, Optional, TypedDict, Union, Callable
+import json
 
 import ollama
+from ollama import chat
 import requests
 import streamlit as st
 
@@ -37,11 +39,34 @@ class OllamaAPI:
     @staticmethod
     def get_local_models() -> List[Dict[str, Any]]:
         """Get all local models"""
-        return ErrorHandler.try_execute(
+        models_response = ErrorHandler.try_execute(
             ollama.list,
             error_context="Failed to fetch models",
             default_return={"models": []},
-        ).get("models", [])
+        )
+
+        # Get the models list
+        models = models_response.get("models", [])
+
+        # Convert Model objects to dictionaries and ensure 'name' key exists
+        formatted_models = []
+        for model in models:
+            if hasattr(model, "__dict__"):
+                # Convert model object to dict
+                model_dict = model.__dict__.copy() if hasattr(model, "__dict__") else {}
+
+                # If it's a modern API response, ensure name compatibility
+                if hasattr(model, "model") and not model_dict.get("name"):
+                    model_dict["name"] = model.model
+
+                formatted_models.append(model_dict)
+            elif isinstance(model, dict):
+                # If it's already a dict, ensure name key exists
+                if "model" in model and "name" not in model:
+                    model["name"] = model["model"]
+                formatted_models.append(model)
+
+        return formatted_models
 
     @staticmethod
     def pull_model(model_name: str) -> bool:
@@ -293,6 +318,7 @@ class OllamaAPI:
         system: Optional[str] = None,
         temperature: float = 0.7,
         stream: bool = True,
+        tools: Any = None,
     ) -> ollama.ChatResponse:
         """
         Generate a chat completion using Ollama
@@ -303,57 +329,303 @@ class OllamaAPI:
             system: Optional system prompt
             temperature: Temperature for generation (0.0 to 1.0)
             stream: Whether to stream the response
+            tools: Optional list of tools to provide to the model - can be function references or tool definitions
 
         Returns:
             Either a complete response object or a generator of response chunks
         """
 
-        # If system prompt is provided, add it as a system message at the beginning
-        messages_with_system = messages.copy()
-        if system:
-            # Add system message at the beginning of the list
-            messages_with_system.insert(0, {"role": "system", "content": system})
+        if tools:
+            processed_messages = [
+                {
+                    "role": msg["role"],
+                    "content": (
+                        str(msg["content"])
+                        if isinstance(msg["content"], list)
+                        else msg["content"]
+                    ),
+                }
+                for msg in messages
+            ]
+            response = chat(
+                model=model,
+                messages=processed_messages,
+                tools=tools,
+            )
         else:
-            content = """
-            You are a seasoned software developer. Follow these steps for every response:
+            # If system prompt is provided, add it as a system message at the beginning
+            messages_with_system = messages.copy()
+            if system:
+                # Add system message at the beginning of the list
+                messages_with_system.insert(0, {"role": "system", "content": system})
+            else:
+                content = """
+                You are a seasoned software developer. Follow these steps for every response:
 
-            1. First, analyze the question or code carefully
-            2. Break down complex problems into smaller components
-            3. Think through each step of your solution
-            4. Explain your reasoning as you develop the solution
-            5. Provide your final implementation or answer, if your answer contains source code, make sure it is complete and fully implemented, and wrapped in markdown code blocks.
+                1. First, analyze the question or code carefully
+                2. Break down complex problems into smaller components
+                3. Think through each step of your solution
+                4. Explain your reasoning as you develop the solution
+                5. Provide your final implementation or answer, if your answer contains source code, make sure it is complete and fully implemented, and wrapped in markdown code blocks.
 
-            Guidelines:
-            - Respond using markdown formatting
-            - Include language tags in markdown code blocks
-            - When analyzing code, first identify the key components
-            - For implementation questions, explain your approach before coding
-            - If source code is provided, explicitly reference relevant parts
-            - If a question is outside your knowledge, explain why
-            - Keep code examples complete and fully implemented
+                Guidelines:
+                - Respond using markdown formatting
+                - Include language tags in markdown code blocks
+                - When analyzing code, first identify the key components
+                - For implementation questions, explain your approach before coding
+                - If source code is provided, explicitly reference relevant parts
+                - If a question is outside your knowledge, explain why
+                - Keep code examples complete and fully implemented
 
-            Remember to maintain context from previous interactions in the conversation.
+                Remember to maintain context from previous interactions in the conversation.
 
-            Most Important: Always wrap source code in markdown, no exceptions!
-            """
-            messages_with_system.insert(0, {"role": "system", "content": content})
+                Most Important: Always wrap source code in markdown, no exceptions!
+                """
+                messages_with_system.insert(0, {"role": "system", "content": content})
 
-        # Ensure content of messages is a string
-        processed_messages = [
-            {
-                "role": msg["role"],
-                "content": (
-                    str(msg["content"])
-                    if isinstance(msg["content"], list)
-                    else msg["content"]
-                ),
-            }
-            for msg in messages_with_system
-        ]
+            # Ensure content of messages is a string
+            processed_messages = [
+                {
+                    "role": msg["role"],
+                    "content": (
+                        str(msg["content"])
+                        if isinstance(msg["content"], list)
+                        else msg["content"]
+                    ),
+                }
+                for msg in messages_with_system
+            ]
 
-        response = ollama.chat(
-            model=model,
-            messages=processed_messages,
-            options={"temperature": temperature},
-        )
+            # Set up options
+            options = {"temperature": temperature}
+
+            response = chat(
+                model=model,
+                messages=processed_messages,
+                options=options,
+            )
+
         return response
+
+    @staticmethod
+    def _function_to_tool_definition(func: Callable) -> Optional[Dict[str, Any]]:
+        """
+        Convert a Python function to an Ollama tool definition
+
+        Args:
+            func: The function to convert
+
+        Returns:
+            Tool definition dictionary or None if conversion fails
+        """
+        try:
+            import inspect
+            from typing import get_type_hints
+
+            # Get function signature
+            sig = inspect.signature(func)
+
+            # Get function name
+            func_name = func.__name__
+
+            # Get function docstring
+            doc = inspect.getdoc(func) or ""
+
+            # Extract description from docstring (first line)
+            description = doc.split("\n")[0] if doc else f"Function {func_name}"
+
+            # Get type hints
+            type_hints = get_type_hints(func)
+
+            # Define parameter properties
+            properties = {}
+            required = []
+
+            for param_name, param in sig.parameters.items():
+                # Skip self, cls for methods
+                if (
+                    param_name in ("self", "cls")
+                    and param.kind == param.POSITIONAL_OR_KEYWORD
+                ):
+                    continue
+
+                # Get parameter type
+                param_type = type_hints.get(param_name, None)
+                json_type = "string"  # Default type
+
+                # Map Python types to JSON Schema types
+                if param_type:
+                    if param_type in (int, float):
+                        json_type = "number"
+                    elif param_type == bool:
+                        json_type = "boolean"
+                    elif param_type in (list, set, tuple):
+                        json_type = "array"
+                    elif param_type in (dict, object):
+                        json_type = "object"
+
+                # Extract parameter description from docstring
+                param_desc = ""
+                if doc:
+                    param_section = (
+                        doc.split("Args:")[1].split("Returns:")[0]
+                        if "Args:" in doc and "Returns:" in doc
+                        else ""
+                    )
+                    for line in param_section.split("\n"):
+                        if line.strip().startswith(param_name + ":"):
+                            param_desc = line.split(":", 1)[1].strip()
+                            break
+
+                # Add parameter to properties
+                properties[param_name] = {
+                    "type": json_type,
+                    "description": param_desc or f"Parameter {param_name}",
+                }
+
+                # Check if parameter is required
+                if param.default == param.empty:
+                    required.append(param_name)
+
+            # Create tool definition
+            tool_def = {
+                "type": "function",
+                "function": {
+                    "name": func_name,
+                    "description": description,
+                    "parameters": {
+                        "type": "object",
+                        "properties": properties,
+                        "required": required,
+                    },
+                },
+            }
+
+            return tool_def
+        except Exception as e:
+            logger.error(f"Error converting function to tool definition: {str(e)}")
+            return None
+
+    @staticmethod
+    def process_tool_calls(
+        response: ollama.ChatResponse, available_functions: Dict[str, Callable]
+    ) -> Dict[str, Any]:
+        """
+        Process tool calls from Ollama response
+
+        Args:
+            response: Response from Ollama API
+            available_functions: Dictionary of function name to function reference
+
+        Returns:
+            Dictionary with results from tool calls
+        """
+        results = {}
+
+        # Check if response has tool calls
+        if (
+            not hasattr(response, "message")
+            or not hasattr(response.message, "tool_calls")
+            or response.message.tool_calls is None
+        ):
+            return results
+
+        # Process each tool call
+        for tool_call in response.message.tool_calls:
+            try:
+                # Get function name and arguments
+                function_name = getattr(getattr(tool_call, "function", {}), "name", "")
+                arguments_data = getattr(
+                    getattr(tool_call, "function", {}), "arguments", {}
+                )
+                tool_id = getattr(tool_call, "id", f"tool_{len(results)}")
+
+                # Parse arguments
+                if isinstance(arguments_data, str):
+                    try:
+                        arguments = json.loads(arguments_data)
+                    except json.JSONDecodeError:
+                        arguments = {"raw_arguments": arguments_data}
+                else:
+                    # If it's already a dict or similar object, use it directly
+                    arguments = dict(arguments_data) if arguments_data else {}
+
+                # Check if function exists
+                if function_name and (
+                    function_to_call := available_functions.get(function_name)
+                ):
+                    # Call the function
+                    logger.info(f"Calling function: {function_name}")
+                    logger.info(f"Arguments: {arguments}")
+                    output = function_to_call(**arguments)
+                    results[tool_id] = {
+                        "function_name": function_name,
+                        "output": output,
+                    }
+                else:
+                    logger.warning(f"Function {function_name} not found")
+                    results[tool_id] = {
+                        "function_name": function_name,
+                        "error": f"Function {function_name} not found",
+                    }
+            except Exception as e:
+                tool_id = getattr(tool_call, "id", f"unknown_{len(results)}")
+                logger.error(f"Error processing tool call: {str(e)}")
+                results[tool_id] = {"error": str(e)}
+
+        return results
+
+    @staticmethod
+    def add_tool_results_to_messages(
+        messages: List[Dict[str, Any]],
+        response: ollama.ChatResponse,
+        tool_results: Dict[str, Any],
+    ) -> List[Dict[str, Any]]:
+        """
+        Add tool results to messages for further conversation
+
+        Args:
+            messages: Original messages list
+            response: Response from Ollama API
+            tool_results: Results from tool calls
+
+        Returns:
+            Updated messages list with tool results
+        """
+        updated_messages = messages.copy()
+
+        # Add assistant message with tool calls
+        if hasattr(response, "message"):
+            tool_calls = getattr(response.message, "tool_calls", [])
+            updated_messages.append(
+                {
+                    "role": "assistant",
+                    "content": getattr(response.message, "content", ""),
+                    "tool_calls": [] if tool_calls is None else tool_calls,
+                }
+            )
+
+        # Add tool result messages
+        if (
+            hasattr(response, "message")
+            and hasattr(response.message, "tool_calls")
+            and response.message.tool_calls is not None
+        ):
+            for tool_call in response.message.tool_calls:
+                tool_id = getattr(tool_call, "id", "")
+                if tool_id and tool_id in tool_results:
+                    result = tool_results[tool_id]
+                    updated_messages.append(
+                        {
+                            "role": "tool",
+                            "tool_call_id": tool_id,
+                            "name": result.get("function_name", ""),
+                            "content": (
+                                json.dumps(result.get("output", ""))
+                                if isinstance(result.get("output"), (dict, list))
+                                else str(result.get("output", ""))
+                            ),
+                        }
+                    )
+
+        return updated_messages

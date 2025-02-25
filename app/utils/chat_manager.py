@@ -2,7 +2,7 @@ import json
 import os
 import logging
 import datetime
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Union
 import streamlit as st
 
 
@@ -230,7 +230,7 @@ class ChatManager:
 
     def get_messages_for_api(
         self, chat_id: Optional[str] = None
-    ) -> List[Dict[str, str]]:
+    ) -> List[Dict[str, Union[str, List[Any]]]]:
         """
         Get messages in the format needed for the API
 
@@ -250,7 +250,8 @@ class ChatManager:
         messages = []
         for msg in st.session_state.chats[chat_id]["messages"]:
             if msg.get("role") in ["user", "assistant", "system"]:
-                messages.append({"role": msg["role"], "content": msg["content"]})
+                content = msg["content"]
+                messages.append({"role": msg["role"], "content": content})
 
         return messages
 
@@ -262,3 +263,50 @@ class ChatManager:
             return "New Chat"
 
         return st.session_state.chats[chat_id].get("title", "Untitled Chat")
+
+    def reset(self):
+        """Reset the current chat session"""
+        st.session_state.current_chat_id = None
+        st.session_state.chat_history = []
+
+    def add_special_message(
+        self, message: Dict[str, Any], chat_id: Optional[str] = None
+    ) -> bool:
+        """
+        Add a special message (like tool calls) to the chat
+
+        Args:
+            message: Complete message object with role and other properties
+            chat_id: ID of chat to add to, or current chat if None
+
+        Returns:
+            True if successful, False otherwise
+        """
+        if not chat_id:
+            chat_id = st.session_state.current_chat_id
+
+        if not chat_id:
+            # Create a new chat if none exists
+            chat_id = self.create_new_chat()
+
+        if chat_id not in st.session_state.chats:
+            logging.error(f"Invalid chat ID: {chat_id}")
+            return False
+
+        # Add timestamp if not present
+        if "timestamp" not in message:
+            message["timestamp"] = datetime.datetime.now().isoformat()
+
+        # Add to in-memory chat
+        st.session_state.chats[chat_id]["messages"].append(message)
+        st.session_state.chat_history.append(message)
+
+        # Update timestamp
+        st.session_state.chats[chat_id][
+            "updated_at"
+        ] = datetime.datetime.now().isoformat()
+
+        # Auto-save chat
+        self.save_chat(chat_id)
+
+        return True

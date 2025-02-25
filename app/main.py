@@ -4,6 +4,7 @@ from .pages.models_page import ModelsPage
 from .pages.chat_page import ChatPage
 from .pages.comparison_page import ComparisonPage
 from .pages.logs_page import LogsPage
+from .pages.tools_page import ToolsPage
 from .utils.logger import get_logger
 
 # Get application logger
@@ -47,6 +48,9 @@ def main():
     if st.sidebar.button("🔄 Compare Models", key="nav_compare"):
         set_page("compare")
 
+    if st.sidebar.button("🛠️ Tools", key="nav_tools"):
+        set_page("tools")
+
     if st.sidebar.button("📊 Logs", key="nav_logs"):
         set_page("logs")
 
@@ -70,6 +74,9 @@ def main():
         elif current_page == "compare":
             comparison_page = ComparisonPage()
             comparison_page.render()
+        elif current_page == "tools":
+            tools_page = ToolsPage()
+            tools_page.render()
         elif current_page == "logs":
             logs_page = LogsPage()
             logs_page.render()

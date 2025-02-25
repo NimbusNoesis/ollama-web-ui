@@ -1,0 +1,17 @@
+{
+  "type": "function",
+  "function": {
+    "name": "calculator",
+    "description": "Perform mathematical calculations",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "expression": {
+          "type": "string",
+          "description": "The mathematical expression to evaluate"
+        }
+      },
+      "required": ["expression"]
+    }
+  }
+}
