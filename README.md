@@ -4,33 +4,40 @@ A comprehensive UI for Ollama, providing model management, chat capabilities, an
 
 ## Features
 
-### Model Management
+### 🤖 Model Management
 
-- **Browse Models**: View all installed models with size and modification date
-- **Model Details**: Examine detailed information about models, including parameters, templates, and system prompts
-- **Search Models**: Find and install models from the Ollama library
-- **Download Progress**: Track model download progress with visual indicators
+- Browse and manage installed models
+- View detailed model information including parameters and templates
+- Search and download models from Ollama library
+- Real-time download progress tracking
+- Delete unused models
 
-### Chat Interface
+### 💬 Chat Interface
 
-- **Full Chat Capabilities**: Chat with any installed Ollama model
-- **Conversation Management**: Save, load, and delete conversations
-- **Custom Settings**: Adjust temperature and system prompts for each chat
-- **Persistent Storage**: All chats are saved as JSON files for easy access
+- Interactive chat with any installed model
+- Adjustable parameters (temperature, system prompts)
+- Save and load conversations
+- Persistent chat history
+- Multi-session support
 
-### Model Comparison
+### 🔄 Model Comparison
 
-- **Compare Multiple Models**: Run the same prompt against multiple models side by side
-- **Visual Comparison**: Easily compare responses from different models
-- **Customizable**: Select any combination of installed models to compare
+- Compare responses from multiple models simultaneously
+- Side-by-side output comparison
+- Customizable model selection
+- Unified prompt interface
 
 ## Requirements
 
-- Python 3.8 or higher
-- Streamlit
-- Pandas
+- Python 3.8+
 - Ollama (running locally)
-- Additional Python libraries: requests, json, datetime, markdown
+- Required Python packages:
+  - streamlit
+  - pandas
+  - ollama
+  - requests
+  - markdown
+  - pygments
 
 ## Installation
 
@@ -57,19 +64,51 @@ streamlit run main.py
 
 The application is structured in a modular way for better maintainability:
 
-- `app/api`: API interaction with Ollama
-- `app/components`: Reusable UI components
-- `app/pages`: Different pages of the application
-- `app/utils`: Utility functions and classes
-- `app/data`: Data storage (chats)
+ollama-ui/
+├── app/
+│ ├── api/ # Ollama API integration
+│ ├── components/ # Reusable UI components
+│ ├── data/ # Chat history storage
+│ ├── pages/ # Application pages
+│ ├── utils/ # Utility functions
+│ └── main.py # App initialization
+├── requirements.txt
+└── main.py # Entry point
+
+## Usage
+
+### Model Management
+
+- Navigate to the Models page to view installed models
+- Use the search function to find and download new models
+- View detailed model information and parameters
+- Remove unused models
+
+### Chat Interface
+
+- Select a model to chat with
+- Adjust temperature and system prompts
+- Save conversations for later reference
+- Load previous chat sessions
+
+### Model Comparison
+
+- Select multiple models to compare
+- Enter a single prompt to test across models
+- View responses side by side
+- Compare model performance and outputs
 
 ## Contributing
 
-Contributions are welcome! Please feel free to submit a Pull Request.
+1. Fork the repository
+1. Create a feature branch (git checkout -b feature/enhancement)
+1. Commit changes (git commit -am 'Add new feature')
+1. Push to branch (git push origin feature/enhancement)
+1. Create Pull Request
 
 ## License
 
-This project is licensed under the MIT License - see the LICENSE file for details.
+This project is licensed under the Apache 2 License - see the LICENSE file for details.
 
 ## Acknowledgments
 
