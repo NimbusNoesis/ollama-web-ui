@@ -4,3 +4,4 @@ pandas
 ollama
 datetime
 markdown
+pygments

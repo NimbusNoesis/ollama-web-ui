@@ -59,7 +59,6 @@ class ChatPage:
         """Handle model response when thinking state is active"""
         if not st.session_state.thinking:
             return
-
         try:
             # Get the model and messages
             model = st.session_state.selected_model
@@ -73,7 +72,6 @@ class ChatPage:
 
             # Get model response
             response_text = ""
-
             result = OllamaAPI.chat_completion(
                 model=model,
                 messages=cast(List[Dict[str, Union[str, List[Any]]]], messages),
@@ -82,24 +80,12 @@ class ChatPage:
                 stream=True,
             )
 
-            # Parse the assistant's message from the model response
-            if result and "message" in result:
-                # Extract just the content field from the message
-                if "content" in result["message"]:
-                    response_text = result["message"]["content"]
-                else:
-                    response_text = str(result["message"])
-            else:
-                response_text = str(result)
-
             # Add the response to chat history
-            self.chat_manager.add_message("assistant", response_text)
-
+            self.chat_manager.add_message("assistant", result.message.content or "")
         except Exception as e:
             # Add error message to chat
             error_message = f"Error: {str(e)}"
             self.chat_manager.add_message("system", error_message)
-
         finally:
             # Remove thinking indicator
             self.chat_ui.remove_thinking_indicator()

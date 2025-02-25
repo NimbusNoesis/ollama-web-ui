@@ -87,8 +87,8 @@ class ModelComparison:
         if num_outputs == 1:
             # Just one model, use full width
             for model_name, output in outputs.items():
-                st.subheader(f"Output from {model_name}")
-                st.markdown(f"```\n{output}\n```")
+                st.subheader(model_name)
+                st.markdown(output)
         else:
             # Multiple models, create columns
             cols = st.columns(min(num_outputs, 3))  # Max 3 columns
@@ -97,15 +97,19 @@ class ModelComparison:
             for idx, (model_name, output) in enumerate(outputs.items()):
                 col_idx = idx % len(cols)  # Wrap around if more than 3 outputs
                 with cols[col_idx]:
-                    st.subheader(f"{model_name}")
-                    st.markdown(f"```\n{output}\n```")
+                    st.subheader(model_name)
+                    st.markdown(output)
 
                 # Start a new row after every 3 models
                 if col_idx == len(cols) - 1 and idx < num_outputs - 1:
                     st.markdown("---")
                     cols = st.columns(min(num_outputs - idx - 1, 3))
 
-    def render(self, available_models: List[Dict[str, Any]], on_compare: Callable[[List[str], str], Dict[str, str]]):
+    def render(
+        self,
+        available_models: List[Dict[str, Any]],
+        on_compare: Callable[[List[str], str], Dict[str, str]],
+    ):
         """
         Render the full comparison UI
 
