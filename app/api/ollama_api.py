@@ -1,10 +1,11 @@
-import ollama
 import logging
-import requests
 import re
 import time
+from typing import Any, Dict, Generator, List, Optional, TypedDict, Union
+
+import ollama
+import requests
 import streamlit as st
-from typing import Dict, List, Any, Union, Generator, Optional, TypedDict
 
 
 class ProgressResponse(TypedDict, total=False):
@@ -129,7 +130,7 @@ class OllamaAPI:
             # If no cache or no results from cache, fetch from ollama.com
             return OllamaAPI._fetch_models_from_web(query)
         except Exception as e:
-            logging.error(f"Error searching models: {str(e)}", exc_info=True)
+            logging.error("Error searching models: %s", str(e), exc_info=True)
             return []
 
     @staticmethod
@@ -142,253 +143,100 @@ class OllamaAPI:
             "Connection": "keep-alive",
         }
 
-        try:
-            logging.info("Fetching models from ollama.com/library...")
-            models_response = requests.get(
-                "https://ollama.com/library", headers=headers, timeout=10
-            )
-            logging.info(f"Initial response status: {models_response.status_code}")
+        logging.info("Fetching models from ollama.com/library...")
+        models_response = requests.get(
+            "https://ollama.com/library", headers=headers, timeout=10
+        )
+        logging.info("Initial response status: %s", models_response.status_code)
 
-            if models_response.status_code == 200:
-                model_links = re.findall(
-                    r'href="/library/([^"]+)', models_response.text
-                )
-                logging.info(f"Found {len(model_links)} model links")
+        if models_response.status_code == 200:
+            model_links = re.findall(r'href="/library/([^"]+)', models_response.text)
+            logging.info("Found %d model links", len(model_links))
 
-                if model_links:
-                    model_names = [link for link in model_links if link]
-                    logging.info(f"Processing models: {model_names}")
+            if model_links:
+                model_names = [link for link in model_links if link]
+                logging.info(f"Processing models: {model_names}")
 
-                    models_data = []
-                    for name in model_names:
-                        try:
-                            logging.info(f"Fetching tags for {name}...")
-                            tags_response = requests.get(
-                                f"https://ollama.com/library/{name}/tags",
-                                headers=headers,
-                                timeout=10,
+                models_data = []
+                for name in model_names:
+                    try:
+                        logging.info(f"Fetching tags for {name}...")
+                        tags_response = requests.get(
+                            f"https://ollama.com/library/{name}/tags",
+                            headers=headers,
+                            timeout=10,
+                        )
+                        logging.info(
+                            "Tags response status for %s: %s",
+                            name,
+                            tags_response.status_code,
+                        )
+
+                        if tags_response.status_code == 200:
+                            tags = re.findall(f'{name}:[^"\\s]*', tags_response.text)
+                            filtered_tags = [
+                                tag
+                                for tag in tags
+                                if not any(x in tag for x in ["text", "base", "fp"])
+                                and not re.match(r".*q[45]_[01]", tag)
+                            ]
+
+                            model_type = (
+                                "vision"
+                                if "vision" in name
+                                else "embedding"
+                                if "minilm" in name
+                                else "text"
                             )
-                            logging.info(
-                                f"Tags response status for {name}: {tags_response.status_code}"
+
+                            # Extract tags for display
+                            display_tags = OllamaAPI.extract_tags_from_name(name)
+                            if model_type == "vision":
+                                display_tags.extend(["vision", "multimodal"])
+                            elif model_type == "embedding":
+                                display_tags.extend(["embedding"])
+
+                            models_data.append(
+                                {
+                                    "name": name,
+                                    "tags": (
+                                        ", ".join(display_tags)
+                                        if display_tags
+                                        else "general"
+                                    ),
+                                    "variants": filtered_tags,
+                                }
                             )
+                            logging.info("Successfully processed %s", name)
+                        else:
+                            logging.warning("Failed to get tags for %s", name)
+                    except Exception as e:
+                        logging.error("Error processing %s: %s", name, str(e))
+                        continue
 
-                            if tags_response.status_code == 200:
-                                tags = re.findall(
-                                    f'{name}:[^"\\s]*', tags_response.text
-                                )
-                                filtered_tags = [
-                                    tag
-                                    for tag in tags
-                                    if not any(x in tag for x in ["text", "base", "fp"])
-                                    and not re.match(r".*q[45]_[01]", tag)
-                                ]
+                logging.info("Fetched and stored %d models", len(models_data))
 
-                                model_type = (
-                                    "vision"
-                                    if "vision" in name
-                                    else "embedding" if "minilm" in name else "text"
-                                )
+                # Cache the models data with current timestamp
+                st.session_state.models_cache = models_data
+                st.session_state.cache_time = time.time()
+                logging.info("Models data cached successfully")
 
-                                # Extract tags for display
-                                display_tags = OllamaAPI.extract_tags_from_name(name)
-                                if model_type == "vision":
-                                    display_tags.extend(["vision", "multimodal"])
-                                elif model_type == "embedding":
-                                    display_tags.extend(["embedding"])
+                # Filter models based on the search query
+                results = []
+                query_lower = query.lower().strip()
 
-                                models_data.append(
-                                    {
-                                        "name": name,
-                                        "tags": (
-                                            ", ".join(display_tags)
-                                            if display_tags
-                                            else "general"
-                                        ),
-                                        "variants": filtered_tags,
-                                    }
-                                )
-                                logging.info(f"Successfully processed {name}")
-                            else:
-                                logging.warning(f"Failed to get tags for {name}")
-                        except Exception as e:
-                            logging.error(f"Error processing {name}: {str(e)}")
-                            continue
+                for model in models_data:
+                    if (
+                        query_lower in model["name"].lower()
+                        or query_lower in model["tags"].lower()
+                    ):
+                        results.append(model)
 
-                    logging.info(f"Fetched and stored {len(models_data)} models")
-
-                    # Cache the models data with current timestamp
-                    st.session_state.models_cache = models_data
-                    st.session_state.cache_time = time.time()
-                    logging.info("Models data cached successfully")
-
-                    # Filter models based on the search query
-                    results = []
-                    query_lower = query.lower().strip()
-
-                    for model in models_data:
-                        if (
-                            query_lower in model["name"].lower()
-                            or query_lower in model["tags"].lower()
-                        ):
-                            results.append(model)
-
-                    if results:
-                        return results
-
-            # Fall back to the local catalog if no results from web
-            return OllamaAPI._get_local_model_catalog(query)
-
-        except Exception as e:
-            logging.error(f"Error fetching from web: {str(e)}", exc_info=True)
-            return OllamaAPI._get_local_model_catalog(query)
-
-    @staticmethod
-    def _get_local_model_catalog(query: str) -> List[Dict[str, Any]]:
-        """Fall back to local model catalog when web search fails"""
-        logging.info("Using local model catalog for search")
-
-        # Enhanced model catalog with a comprehensive list of models
-        model_catalog = [
-            {"name": "llama3", "tags": ["meta", "llama", "large", "general"]},
-            {"name": "llama3:8b", "tags": ["meta", "llama", "small", "general"]},
-            {"name": "llama3:70b", "tags": ["meta", "llama", "huge", "general"]},
-            {"name": "mistral", "tags": ["mistral", "general", "medium"]},
-            {"name": "mixtral", "tags": ["mistral", "mixture", "general", "large"]},
-            {"name": "phi", "tags": ["microsoft", "small", "general"]},
-            {"name": "gemma", "tags": ["google", "general", "medium"]},
-            {"name": "gemma:7b", "tags": ["google", "small", "general"]},
-            {"name": "codellama", "tags": ["meta", "llama", "code", "programming"]},
-            {"name": "vicuna", "tags": ["lmsys", "medium", "general"]},
-            {"name": "orca-mini", "tags": ["small", "general"]},
-            {"name": "stablelm", "tags": ["stability", "medium"]},
-            {"name": "codegemma", "tags": ["google", "code", "programming"]},
-            {"name": "deepseek-coder", "tags": ["deepseek", "code", "programming"]},
-            {"name": "llava", "tags": ["vision", "multimodal", "image"]},
-            {"name": "bakllava", "tags": ["vision", "multimodal", "image"]},
-            {"name": "neural-chat", "tags": ["intel", "general", "medium"]},
-            {"name": "yi", "tags": ["01ai", "general", "medium"]},
-            {"name": "wizard", "tags": ["wizardlm", "general", "medium"]},
-            {"name": "falcon", "tags": ["tii", "general", "medium"]},
-            {"name": "qwen", "tags": ["alibaba", "general", "medium"]},
-            {"name": "nous-hermes", "tags": ["nous", "general", "medium"]},
-            {"name": "openhermes", "tags": ["open", "general", "medium"]},
-            {"name": "mpt", "tags": ["mosaicml", "general", "medium"]},
-            {"name": "dolphin", "tags": ["cognitivecomputations", "general", "medium"]},
-            {"name": "command", "tags": ["cohere", "general", "instruction"]},
-            {"name": "wizardmath", "tags": ["wizardlm", "math", "specific"]},
-            {"name": "orca2", "tags": ["microsoft", "general", "medium"]},
-            {"name": "tinyllama", "tags": ["tiny", "small", "efficient"]},
-            # Additional models
-            {"name": "llama2", "tags": ["meta", "llama", "general"]},
-            {"name": "llama2:7b", "tags": ["meta", "llama", "small", "general"]},
-            {"name": "llama2:13b", "tags": ["meta", "llama", "medium", "general"]},
-            {"name": "llama2:70b", "tags": ["meta", "llama", "large", "general"]},
-            {"name": "mistral:7b", "tags": ["mistral", "small", "general"]},
-            {
-                "name": "mixtral:8x7b",
-                "tags": ["mistral", "mixture", "large", "general"],
-            },
-            {"name": "phi:3", "tags": ["microsoft", "small", "general"]},
-            {"name": "phi:2", "tags": ["microsoft", "small", "general"]},
-            {"name": "gemma:2b", "tags": ["google", "tiny", "general"]},
-            {
-                "name": "codellama:7b",
-                "tags": ["meta", "llama", "small", "code", "programming"],
-            },
-            {
-                "name": "codellama:13b",
-                "tags": ["meta", "llama", "medium", "code", "programming"],
-            },
-            {
-                "name": "codellama:34b",
-                "tags": ["meta", "llama", "large", "code", "programming"],
-            },
-            {
-                "name": "codellama:70b",
-                "tags": ["meta", "llama", "huge", "code", "programming"],
-            },
-            {"name": "wizard:7b", "tags": ["wizardlm", "small", "general"]},
-            {"name": "wizard:13b", "tags": ["wizardlm", "medium", "general"]},
-            {
-                "name": "codegemma:7b",
-                "tags": ["google", "small", "code", "programming"],
-            },
-            {"name": "codegemma:2b", "tags": ["google", "tiny", "code", "programming"]},
-            {"name": "yi:6b", "tags": ["01ai", "small", "general"]},
-            {"name": "yi:34b", "tags": ["01ai", "large", "general"]},
-            {"name": "qwen:7b", "tags": ["alibaba", "small", "general"]},
-            {"name": "qwen:14b", "tags": ["alibaba", "medium", "general"]},
-            {"name": "qwen:72b", "tags": ["alibaba", "large", "general"]},
-            {"name": "qwen2", "tags": ["alibaba", "general"]},
-            {"name": "qwen2:7b", "tags": ["alibaba", "small", "general"]},
-            {"name": "qwen2:72b", "tags": ["alibaba", "large", "general"]},
-            {"name": "wizardcoder", "tags": ["wizardlm", "code", "programming"]},
-            {
-                "name": "wizardcoder:7b",
-                "tags": ["wizardlm", "small", "code", "programming"],
-            },
-            {
-                "name": "wizardcoder:13b",
-                "tags": ["wizardlm", "medium", "code", "programming"],
-            },
-            {
-                "name": "wizardcoder:34b",
-                "tags": ["wizardlm", "large", "code", "programming"],
-            },
-            {
-                "name": "wizardmath:7b",
-                "tags": ["wizardlm", "small", "math", "specific"],
-            },
-            {
-                "name": "wizardmath:13b",
-                "tags": ["wizardlm", "medium", "math", "specific"],
-            },
-            {"name": "openchat", "tags": ["open", "general"]},
-            {"name": "openchat:7b", "tags": ["open", "small", "general"]},
-            {"name": "nous-hermes:13b", "tags": ["nous", "medium", "general"]},
-            {"name": "openhermes:7b", "tags": ["open", "small", "general"]},
-            {"name": "openhermes:2.5", "tags": ["open", "general"]},
-            {"name": "olmo", "tags": ["allen", "general"]},
-            {"name": "olmo:7b", "tags": ["allen", "small", "general"]},
-            {"name": "stable-code", "tags": ["stability", "code", "programming"]},
-            {
-                "name": "stable-code:3b",
-                "tags": ["stability", "tiny", "code", "programming"],
-            },
-            {"name": "command-r", "tags": ["cohere", "general", "instruction"]},
-            {
-                "name": "command-r:34b",
-                "tags": ["cohere", "large", "general", "instruction"],
-            },
-            {"name": "orca2:7b", "tags": ["microsoft", "small", "general"]},
-            {"name": "orca2:13b", "tags": ["microsoft", "medium", "general"]},
-            {"name": "falcon:7b", "tags": ["tii", "small", "general"]},
-            {"name": "falcon:40b", "tags": ["tii", "large", "general"]},
-            {"name": "vicuna:7b", "tags": ["lmsys", "small", "general"]},
-            {"name": "vicuna:13b", "tags": ["lmsys", "medium", "general"]},
-            {"name": "tinyllama:1.1b", "tags": ["tiny", "very-small", "efficient"]},
-            {"name": "solar", "tags": ["upstage", "general"]},
-            {"name": "solar:10.7b", "tags": ["upstage", "medium", "general"]},
-            {"name": "phi3", "tags": ["microsoft", "general"]},
-            {"name": "phi3:medium", "tags": ["microsoft", "medium", "general"]},
-            {"name": "phi3:small", "tags": ["microsoft", "small", "general"]},
-            {"name": "phi3:mini", "tags": ["microsoft", "tiny", "general"]},
-        ]
-
-        # Simple search logic - match against model name or tags
-        results = []
-        query_lower = query.lower().strip()
-
-        for model in model_catalog:
-            # Check if query is in model name or tags
-            if query_lower in model["name"].lower() or any(
-                query_lower in tag.lower() for tag in model["tags"]
-            ):
-                results.append(
-                    {"name": model["name"], "tags": ", ".join(model["tags"])}
-                )
-
-        return results
+                return results
+            else:
+                return []
+        else:
+            return []
 
     @staticmethod
     def extract_tags_from_name(model_name: str) -> List[str]:
@@ -466,6 +314,30 @@ class OllamaAPI:
         if system:
             # Add system message at the beginning of the list
             messages_with_system.insert(0, {"role": "system", "content": system})
+        else:
+            content = """
+            You are a seasoned software developer. Follow these steps for every response:
+
+            1. First, analyze the question or code carefully
+            2. Break down complex problems into smaller components
+            3. Think through each step of your solution
+            4. Explain your reasoning as you develop the solution
+            5. Provide your final implementation or answer, if your answer contains source code, make sure it is complete and fully implemented, and wrapped in markdown code blocks.
+
+            Guidelines:
+            - Respond using markdown formatting
+            - Include language tags in markdown code blocks
+            - When analyzing code, first identify the key components
+            - For implementation questions, explain your approach before coding
+            - If source code is provided, explicitly reference relevant parts
+            - If a question is outside your knowledge, explain why
+            - Keep code examples complete and fully implemented
+
+            Remember to maintain context from previous interactions in the conversation.
+
+            Most Important: Always wrap source code in markdown, no exceptions!
+            """
+            messages_with_system.insert(0, {"role": "system", "content": content})
 
         # Ensure content of messages is a string
         processed_messages = [
@@ -480,5 +352,9 @@ class OllamaAPI:
             for msg in messages_with_system
         ]
 
-        response = ollama.chat(model=model, messages=processed_messages)
+        response = ollama.chat(
+            model=model,
+            messages=processed_messages,
+            options={"temperature": temperature},
+        )
         return response
