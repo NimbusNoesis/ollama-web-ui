@@ -1,9 +1,9 @@
 import streamlit as st
 import logging
-from app.api.ollama_api import OllamaAPI
-from app.pages.models_page import ModelsPage
-from app.pages.chat_page import ChatPage
-from app.pages.comparison_page import ComparisonPage
+from .api.ollama_api import OllamaAPI
+from .pages.models_page import ModelsPage
+from .pages.chat_page import ChatPage
+from .pages.comparison_page import ComparisonPage
 
 # Configure logging
 logging.basicConfig(
