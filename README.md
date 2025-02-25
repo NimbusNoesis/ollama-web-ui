@@ -60,21 +60,6 @@ streamlit run main.py
 
 3. Open your browser and navigate to the URL displayed in the terminal (typically <http://localhost:8501>)
 
-## Application Structure
-
-The application is structured in a modular way for better maintainability:
-
-ollama-ui/
-├── app/
-│ ├── api/ # Ollama API integration
-│ ├── components/ # Reusable UI components
-│ ├── data/ # Chat history storage
-│ ├── pages/ # Application pages
-│ ├── utils/ # Utility functions
-│ └── main.py # App initialization
-├── requirements.txt
-└── main.py # Entry point
-
 ## Usage
 
 ### Model Management
