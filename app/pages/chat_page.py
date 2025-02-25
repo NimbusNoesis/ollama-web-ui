@@ -115,7 +115,6 @@ class ChatPage:
                 and st.session_state.installed_tools
             ):
                 # Tools installed in the tools directory - use function references directly
-                # This is the new approach using direct function references
                 try:
                     function_tools = ToolLoader.load_all_tools()
                     available_functions = ToolLoader.load_all_tool_functions()
@@ -185,209 +184,177 @@ class ChatPage:
                     messages=messages,
                 )
 
-            # Handle tool calls - look for them in different possible structures
-            tool_calls = []
-
-            # First try the new structure with message.tool_calls
-            if (
-                response
-                and hasattr(response, "message")
-                and hasattr(response.message, "tool_calls")
-            ):
-                tool_calls = response.message.tool_calls or []
-                content = (
-                    response.message.content or "I'll use a tool to help with this."
-                )
-                self.chat_manager.add_message("assistant", str(content))
-            # Fall back to previous dict structure
+            # Add the model's initial response to the chat
+            if hasattr(response, "message") and hasattr(response.message, "content"):
+                # Add the initial response text to chat
+                if response.message.content:
+                    self.chat_manager.add_message(
+                        "assistant", str(response.message.content)
+                    )
             elif (
-                response
-                and isinstance(response, dict)
+                isinstance(response, dict)
+                and "message" in response
+                and "content" in response["message"]
+            ):
+                # Fallback for dictionary response format
+                if response["message"]["content"]:
+                    self.chat_manager.add_message(
+                        "assistant", str(response["message"]["content"])
+                    )
+
+            # Check for tool calls and process them
+            has_tool_calls = (
+                hasattr(response, "message")
+                and hasattr(response.message, "tool_calls")
+                and response.message.tool_calls
+            ) or (
+                isinstance(response, dict)
                 and "message" in response
                 and "tool_calls" in response["message"]
                 and response["message"]["tool_calls"]
-            ):
-                tool_calls = response["message"]["tool_calls"]
-                content = (
-                    response["message"]["content"]
-                    or "I'll use a tool to help with this."
+            )
+
+            if has_tool_calls and st.session_state.use_installed_tools:
+                # Process tool calls using the new helper method
+                tool_results = OllamaAPI.process_tool_calls(
+                    response, available_functions
                 )
-                self.chat_manager.add_message("assistant", str(content))
 
-            # Process tool calls if any
-            if tool_calls:
-                for tool_call in tool_calls:
-                    # Handle both old and new format
-                    if isinstance(tool_call, dict):
-                        # Old format (dict)
-                        function_name = tool_call["function"]["name"]
-                        function_id = tool_call["id"]
-                        arguments_str = tool_call["function"]["arguments"]
-                    else:
-                        # New format (object)
-                        # Access attributes safely
-                        function_name = getattr(tool_call.function, "name", "")
-                        function_id = getattr(tool_call, "id", "")
-                        arguments_str = getattr(tool_call.function, "arguments", {})
+                # Display tool calls and results in the UI
+                for tool_id, result in tool_results.items():
+                    function_name = result.get("function_name", "unknown_function")
 
-                    try:
-                        # Parse arguments
-                        if isinstance(arguments_str, str):
-                            try:
-                                arguments = json.loads(arguments_str)
-                            except json.JSONDecodeError:
-                                arguments = {"raw_arguments": arguments_str}
+                    # Display tool call
+                    arg_str = "arguments not available"
+                    if "output" in result:
+                        # Format output for display
+                        if isinstance(result["output"], (dict, list)):
+                            result_str = json.dumps(result["output"], indent=2)
                         else:
-                            # If it's already a dict or similar object, use it directly
-                            arguments = dict(arguments_str) if arguments_str else {}
-                    except Exception:
-                        # Last resort for arguments
-                        arguments = {"raw_arguments": str(arguments_str)}
+                            result_str = str(result["output"])
 
-                    # Format arguments for display
-                    arg_display = ", ".join(
-                        [f"{k}={repr(v)}" for k, v in arguments.items()]
-                    )
-
-                    # Check if we should use installed tools
-                    use_real_tools = st.session_state.use_installed_tools
-                    tool_result = None
-
-                    if use_real_tools:
-                        try:
-                            # Execute the tool function - try the new approach first
-                            self.chat_manager.add_message(
-                                "system",
-                                f"🛠️ **Tool Call**: `{function_name}({arg_display})`\n\n"
-                                f"*Executing tool...*",
-                            )
-
-                            # Find the function to execute
-                            function_to_call = available_functions.get(function_name)
-
-                            if function_to_call and callable(function_to_call):
-                                # New approach: directly call the function
-                                tool_result = function_to_call(**arguments)
-                                logger.info(
-                                    f"Executed tool function {function_name} directly"
-                                )
-                            else:
-                                # Fall back to the old approach
-                                tool_result = ToolLoader.execute_tool(
-                                    function_name, dict(arguments)
-                                )
-                                logger.info(
-                                    f"Executed tool {function_name} via ToolLoader"
-                                )
-
-                            # Convert result to string if needed
-                            if not isinstance(tool_result, (str, dict, list)):
-                                tool_result = str(tool_result)
-
-                            # Format result for display
-                            if isinstance(tool_result, (dict, list)):
-                                result_str = json.dumps(tool_result, indent=2)
-                            else:
-                                result_str = str(tool_result)
-
-                            # Add tool result display to chat
-                            self.chat_manager.add_message(
-                                "system",
-                                f"🛠️ **Tool Result**:\n```json\n{result_str}\n```",
-                            )
-                        except Exception as e:
-                            # Handle tool execution error
-                            error_msg = (
-                                f"Error executing tool {function_name}: {str(e)}"
-                            )
-                            logger.error(error_msg, exc_info=True)
-                            tool_result = {"error": error_msg}
-
-                            # Add error message to chat
-                            self.chat_manager.add_message(
-                                "system",
-                                f"❌ **Tool Error**: {error_msg}",
-                            )
-                    else:
-                        # Simulation mode
+                        # Add tool call and result to chat UI
                         self.chat_manager.add_message(
                             "system",
-                            f"🛠️ **Tool Call**: `{function_name}({arg_display})`\n\n"
-                            f"*This is a simulation. In a real application, "
-                            f"you would implement the actual function logic and return results.*",
+                            f"🛠️ **Tool Call**: `{function_name}`\n\n"
+                            f"*Executing tool...*",
                         )
 
-                        # Simulate a tool response
-                        tool_result = f"Simulated result for {function_name} with arguments: {arguments_str}"
+                        self.chat_manager.add_message(
+                            "system",
+                            f"🛠️ **Tool Result**:\n```json\n{result_str}\n```",
+                        )
+                    elif "error" in result:
+                        # Handle tool execution error
+                        self.chat_manager.add_message(
+                            "system",
+                            f"🛠️ **Tool Call**: `{function_name}`\n\n"
+                            f"*Executing tool...*",
+                        )
 
-                    # Create the tool response message based on format
+                        self.chat_manager.add_message(
+                            "system",
+                            f"❌ **Tool Error**: {result['error']}",
+                        )
+
+                # Update messages with tool results for follow-up
+                updated_messages = OllamaAPI.add_tool_results_to_messages(
+                    messages, response, tool_results
+                )
+
+                # Get follow-up response from model with the tool results
+                follow_up_response = OllamaAPI.chat_completion(
+                    model=model,
+                    messages=updated_messages,
+                    system=system_prompt,
+                    temperature=temperature,
+                )
+
+                # Add the follow-up response to chat
+                if hasattr(follow_up_response, "message") and hasattr(
+                    follow_up_response.message, "content"
+                ):
+                    if follow_up_response.message.content:
+                        self.chat_manager.add_message(
+                            "assistant", str(follow_up_response.message.content)
+                        )
+                elif (
+                    isinstance(follow_up_response, dict)
+                    and "message" in follow_up_response
+                ):
+                    if follow_up_response["message"].get("content"):
+                        self.chat_manager.add_message(
+                            "assistant", str(follow_up_response["message"]["content"])
+                        )
+
+            elif has_tool_calls and not st.session_state.use_installed_tools:
+                # Simulation mode for tool calls
+                # Handle both object-based and dict-based formats
+                tool_calls = []
+
+                if (
+                    hasattr(response, "message")
+                    and hasattr(response.message, "tool_calls")
+                    and response.message.tool_calls is not None
+                ):
+                    tool_calls = response.message.tool_calls
+                elif (
+                    isinstance(response, dict)
+                    and "message" in response
+                    and "tool_calls" in response["message"]
+                ) and response["message"]["tool_calls"] is not None:
+                    tool_calls = response["message"]["tool_calls"]
+
+                for tool_call in tool_calls:
+                    # Extract function info safely for both dict and object formats
                     if isinstance(tool_call, dict):
-                        # Old format (dict)
-                        tool_message = {
-                            "role": "tool",
-                            "tool_call_id": function_id,
-                            "name": function_name,
-                            "content": (
-                                json.dumps(tool_result)
-                                if isinstance(tool_result, (dict, list))
-                                else tool_result
-                            ),
-                        }
+                        function_name = tool_call.get("function", {}).get(
+                            "name", "unknown_function"
+                        )
+                        arguments = tool_call.get("function", {}).get("arguments", "{}")
                     else:
-                        # New format (object)
-                        tool_message = {
-                            "role": "tool",
-                            "tool_call_id": function_id,
-                            "name": function_name,
-                            "content": (
-                                json.dumps(tool_result)
-                                if isinstance(tool_result, (dict, list))
-                                else tool_result
-                            ),
-                        }
+                        function_name = getattr(
+                            getattr(tool_call, "function", {}),
+                            "name",
+                            "unknown_function",
+                        )
+                        arguments = getattr(
+                            getattr(tool_call, "function", {}), "arguments", "{}"
+                        )
 
-                    # Add to chat display
-                    self.chat_manager.add_special_message(tool_message)
-
-                    # Get follow-up response from model
-                    follow_up_messages = self.chat_manager.get_messages_for_api()
-                    follow_up_response = OllamaAPI.chat_completion(
-                        model=model,
-                        messages=follow_up_messages,
-                        system=system_prompt,
-                        temperature=temperature,
+                    # Display simulation message
+                    self.chat_manager.add_message(
+                        "system",
+                        f"🛠️ **Tool Call**: `{function_name}`\n\n"
+                        f"*This is a simulation. In a real application, "
+                        f"you would implement the actual function logic and return results.*",
                     )
 
-                    # Handle both old and new response formats
-                    if (
-                        isinstance(follow_up_response, dict)
-                        and "message" in follow_up_response
-                    ):
-                        # Old format
-                        content = follow_up_response["message"]["content"]
-                        if content:
-                            self.chat_manager.add_message("assistant", content)
-                    elif hasattr(follow_up_response, "message") and hasattr(
-                        follow_up_response.message, "content"
-                    ):
-                        # New format
-                        content = follow_up_response.message.content
-                        if content:
-                            self.chat_manager.add_message("assistant", content)
-            elif response:
-                # Regular response (no tool calls)
-                if isinstance(response, dict) and "message" in response:
-                    # Old format
-                    content = response["message"]["content"]
-                    if content:
-                        self.chat_manager.add_message("assistant", content)
-                elif hasattr(response, "message") and hasattr(
-                    response.message, "content"
+                # For simulation, just get a follow-up response with the original messages
+                follow_up_response = OllamaAPI.chat_completion(
+                    model=model,
+                    messages=messages,
+                    system=system_prompt,
+                    temperature=temperature,
+                )
+
+                # Add the follow-up response to chat
+                if hasattr(follow_up_response, "message") and hasattr(
+                    follow_up_response.message, "content"
                 ):
-                    # New format
-                    content = response.message.content
-                    if content:
-                        self.chat_manager.add_message("assistant", content)
+                    if follow_up_response.message.content:
+                        self.chat_manager.add_message(
+                            "assistant", str(follow_up_response.message.content)
+                        )
+                elif (
+                    isinstance(follow_up_response, dict)
+                    and "message" in follow_up_response
+                ):
+                    if follow_up_response["message"].get("content"):
+                        self.chat_manager.add_message(
+                            "assistant", str(follow_up_response["message"]["content"])
+                        )
+
         except Exception as e:
             logger.error(f"Error getting chat response: {str(e)}", exc_info=True)
             self.chat_manager.add_message(

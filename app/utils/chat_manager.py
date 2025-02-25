@@ -250,10 +250,7 @@ class ChatManager:
         messages = []
         for msg in st.session_state.chats[chat_id]["messages"]:
             if msg.get("role") in ["user", "assistant", "system"]:
-                # Ensure content can be a list
                 content = msg["content"]
-                if isinstance(content, str):
-                    content = [content]  # Convert string to list
                 messages.append({"role": msg["role"], "content": content})
 
         return messages
