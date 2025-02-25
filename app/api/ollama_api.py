@@ -293,6 +293,8 @@ class OllamaAPI:
         system: Optional[str] = None,
         temperature: float = 0.7,
         stream: bool = True,
+        tools: Optional[List[Dict[str, Any]]] = None,
+        tool_choice: Optional[str] = None,
     ) -> ollama.ChatResponse:
         """
         Generate a chat completion using Ollama
@@ -303,6 +305,8 @@ class OllamaAPI:
             system: Optional system prompt
             temperature: Temperature for generation (0.0 to 1.0)
             stream: Whether to stream the response
+            tools: Optional list of tools to provide to the model
+            tool_choice: Optional control for tool selection (auto, none, or specific tool)
 
         Returns:
             Either a complete response object or a generator of response chunks
@@ -351,9 +355,24 @@ class OllamaAPI:
             for msg in messages_with_system
         ]
 
-        response = ollama.chat(
-            model=model,
-            messages=processed_messages,
-            options={"temperature": temperature},
-        )
+        # Set up options
+        options = {"temperature": temperature}
+
+        # Add request parameters
+        request_params = {
+            "model": model,
+            "messages": processed_messages,
+            "options": options,
+        }
+
+        # Add tools if provided
+        if tools:
+            request_params["tools"] = tools
+
+            # Add tool_choice if provided
+            if tool_choice:
+                request_params["tool_choice"] = tool_choice
+
+        # Call Ollama API
+        response = ollama.chat(**request_params)
         return response
