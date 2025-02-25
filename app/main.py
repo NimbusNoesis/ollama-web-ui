@@ -6,12 +6,13 @@ from .pages.comparison_page import ComparisonPage
 from .pages.logs_page import LogsPage
 from .pages.tools_page import ToolsPage
 from .utils.logger import get_logger
+from .utils.session_manager import SessionManager
 
 # Get application logger
 logger = get_logger()
 
 # Set page configuration
-st.set_page_config(page_title="Ollama UI", page_icon="��", layout="wide")
+st.set_page_config(page_title="Ollama UI", page_icon="🦙", layout="wide")
 
 
 # Initialize app state
@@ -20,13 +21,8 @@ def init_app_state():
     if "page" not in st.session_state:
         st.session_state.page = "models"
 
-
-def set_page(page_name: str):
-    """Set the current page"""
-    st.session_state.page = page_name
-    # Reset other states that should be cleared on page change
-    if page_name != "chat" and "thinking" in st.session_state:
-        st.session_state.thinking = False
+    # Initialize all session state variables
+    SessionManager.init_all()
 
 
 def main():
@@ -40,19 +36,19 @@ def main():
     # Navigation links
     st.sidebar.header("Navigation")
     if st.sidebar.button("📋 Models", key="nav_models"):
-        set_page("models")
+        SessionManager.set_page("models")
 
     if st.sidebar.button("💬 Chat", key="nav_chat"):
-        set_page("chat")
+        SessionManager.set_page("chat")
 
     if st.sidebar.button("🔄 Compare Models", key="nav_compare"):
-        set_page("compare")
+        SessionManager.set_page("compare")
 
     if st.sidebar.button("🛠️ Tools", key="nav_tools"):
-        set_page("tools")
+        SessionManager.set_page("tools")
 
     if st.sidebar.button("📊 Logs", key="nav_logs"):
-        set_page("logs")
+        SessionManager.set_page("logs")
 
     # Check Ollama connection
     if not OllamaAPI.check_connection():
@@ -83,7 +79,7 @@ def main():
         else:
             logger.warning(f"Unknown page requested: {current_page}")
             st.error(f"Unknown page: {current_page}")
-            set_page("models")
+            SessionManager.set_page("models")
     except Exception as e:
         logger.error(f"Error rendering page {current_page}: {str(e)}", exc_info=True)
         st.error(f"An error occurred while loading the page: {str(e)}")

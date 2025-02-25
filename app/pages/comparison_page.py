@@ -2,7 +2,13 @@ import streamlit as st
 from typing import Dict, List, Any, Optional, Union, cast
 from app.api.ollama_api import OllamaAPI
 from app.components.model_comparison import ModelComparison
+from app.utils.logger import get_logger
+from app.utils.session_manager import SessionManager
+from app.components.ui_components import collapsible_section
 import time
+
+# Get application logger
+logger = get_logger()
 
 
 class ComparisonPage:
@@ -10,12 +16,11 @@ class ComparisonPage:
 
     def __init__(self):
         """Initialize the comparison page"""
-        # Initialize the model comparison component
-        self.model_comparison = ModelComparison()
+        # Initialize comparison-related session state
+        SessionManager.init_comparison_state()
 
-        # Initialize session state for comparison results
-        if "comparison_results" not in st.session_state:
-            st.session_state.comparison_results = {}
+        # Initialize model comparison component
+        self.model_comparison = ModelComparison()
 
     def run_comparison(self, selected_models: List[str], prompt: str) -> Dict[str, str]:
         """
@@ -39,11 +44,15 @@ class ComparisonPage:
                 try:
                     # Non-streaming mode for comparison
                     response = OllamaAPI.chat_completion(
-                        model=model_name, messages=cast(List[Dict[str, Union[str, List[Any]]]], messages), stream=False
+                        model=model_name,
+                        messages=cast(List[Dict[str, Union[str, List[Any]]]], messages),
+                        stream=False,
                     )
 
                     # Extract the response text using safe dictionary access
-                    results[model_name] = response.get("message", {}).get("content", "Error: No response content")
+                    results[model_name] = response.get("message", {}).get(
+                        "content", "Error: No response content"
+                    )
 
                 except Exception as e:
                     results[model_name] = f"Error: {str(e)}"

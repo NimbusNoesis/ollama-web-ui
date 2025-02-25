@@ -5,6 +5,12 @@ from typing import Dict, List, Any, Optional
 from app.api.ollama_api import OllamaAPI
 from app.utils.logger import get_logger
 from app.utils.tool_loader import ToolLoader
+from app.utils.session_manager import SessionManager
+from app.components.ui_components import (
+    create_card,
+    status_indicator,
+    collapsible_section,
+)
 
 # Get application logger
 logger = get_logger()
@@ -15,7 +21,9 @@ class ToolsPage:
 
     def __init__(self):
         """Initialize the tools page"""
-        # Initialize session state for tools
+        # Initialize tools-related session state
+        SessionManager.init_tools_state()
+
         if "tools" not in st.session_state:
             st.session_state.tools = []
 

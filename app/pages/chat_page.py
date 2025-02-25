@@ -3,10 +3,15 @@ import time
 import json
 from typing import Dict, List, Any, Optional, cast, Union
 from app.api.ollama_api import OllamaAPI
+from app.api.api_helpers import parse_model_response, handle_streaming_response
 from app.components.chat_ui import ChatUI
+from app.components.model_selector import ModelSelector
+from app.components.tool_selector import ToolSelector
 from app.utils.chat_manager import ChatManager
 from app.utils.tool_loader import ToolLoader
 from app.utils.logger import get_logger, exception_handler, ErrorHandler
+from app.utils.session_manager import SessionManager
+from app.components.ui_components import status_indicator, collapsible_section
 
 # Get application logger
 logger = get_logger()
@@ -17,52 +22,40 @@ class ChatPage:
 
     def __init__(self):
         """Initialize the chat page"""
+        # Initialize all chat-related session state
+        SessionManager.init_chat_state()
+
         # Initialize chat manager
         self.chat_manager = ChatManager()
-
-        # Initialize session state for models if needed
-        if "available_models" not in st.session_state:
-            st.session_state.available_models = []
-
-        if "selected_model" not in st.session_state:
-            st.session_state.selected_model = None
-
-        if "chat_temperature" not in st.session_state:
-            st.session_state.chat_temperature = 0.7
-
-        if "system_prompt" not in st.session_state:
-            st.session_state.system_prompt = ""
-
-        if "use_tools" not in st.session_state:
-            st.session_state.use_tools = False
-
-        if "tools" not in st.session_state:
-            st.session_state.tools = []
-
-        if "tool_choice" not in st.session_state:
-            st.session_state.tool_choice = "auto"
-
-        if "use_installed_tools" not in st.session_state:
-            st.session_state.use_installed_tools = False
-
-        if "installed_tools" not in st.session_state:
-            st.session_state.installed_tools = []
 
         # Initialize the chat UI
         self.chat_ui = ChatUI(on_message=self.process_message)
 
-        # Load installed tools
-        self.load_installed_tools()
+        # Initialize the model selector
+        self.model_selector = ModelSelector(on_select=self.handle_model_selected)
 
-    def load_installed_tools(self):
-        """Load installed tools from the tools directory"""
-        try:
-            installed_tools = ToolLoader.load_all_tools()
-            st.session_state.installed_tools = installed_tools
-            logger.info(f"Loaded {len(installed_tools)} tools from tools directory")
-        except Exception as e:
-            logger.error(f"Error loading installed tools: {str(e)}", exc_info=True)
-            st.session_state.installed_tools = []
+        # Initialize the tool selector
+        self.tool_selector = ToolSelector(on_change=self.handle_tools_changed)
+
+    def handle_model_selected(self, model_info: Dict[str, Any]):
+        """
+        Handle when a model is selected
+
+        Args:
+            model_info: Information about the selected model
+        """
+        # Update the session state with the selected model
+        st.session_state.selected_model = model_info.get("name")
+        logger.info(f"Selected model: {model_info.get('name')}")
+
+    def handle_tools_changed(self, tools: List[Any]):
+        """
+        Handle when selected tools change
+
+        Args:
+            tools: List of active tools
+        """
+        logger.info(f"Active tools changed: {len(tools)} tools")
 
     def process_message(self, message: str):
         """
@@ -101,40 +94,20 @@ class ChatPage:
             temperature = st.session_state.chat_temperature
             messages = self.chat_manager.get_messages_for_api()
 
-            # Get tools if needed
-            tools = None
-            tool_choice = None
+            # Get active tools from the tool selector
+            tools = self.tool_selector.get_active_tools()
+            tool_choice = st.session_state.tool_choice
             available_functions = {}
 
-            if st.session_state.use_tools and st.session_state.tools:
-                # User-created tools from the session
-                tools = [tool["definition"] for tool in st.session_state.tools]
-                tool_choice = st.session_state.tool_choice
-            elif (
-                st.session_state.use_installed_tools
-                and st.session_state.installed_tools
-            ):
-                # Tools installed in the tools directory - use function references directly
+            if tools and st.session_state.use_installed_tools:
+                # For installed tools, load function references
                 try:
-                    function_tools = ToolLoader.load_all_tools()
                     available_functions = ToolLoader.load_all_tool_functions()
-                    # Make sure we have the right type
-                    if isinstance(function_tools, list):
-                        tools = function_tools
-                        tool_choice = st.session_state.tool_choice
-                        logger.info(
-                            f"Loaded {len(tools)} tool functions and {len(available_functions)} available functions"
-                        )
-                    else:
-                        logger.warning(
-                            "Loaded tools were not a list, falling back to installed tools"
-                        )
-                        tools = st.session_state.installed_tools
+                    logger.info(
+                        f"Loaded {len(available_functions)} available functions"
+                    )
                 except Exception as e:
                     logger.error(f"Error loading tool functions: {str(e)}")
-                    tools = (
-                        st.session_state.installed_tools
-                    )  # Fall back to the old approach
 
             try:
                 # Get model response - try with tools first
@@ -367,45 +340,10 @@ class ChatPage:
 
     def render_sidebar(self):
         """Render the chat sidebar"""
-        st.sidebar.subheader("Chat Settings")
+        st.sidebar.subheader("Model Selection")
 
-        # Model selector
-        if st.session_state.available_models:
-            # Extract model names from available models, handling different data structures
-            models = []
-            for model_data in st.session_state.available_models:
-                if isinstance(model_data, dict):
-                    # Try different possible keys for the model name
-                    model_name = model_data.get("name") or model_data.get("model")
-                    if model_name:
-                        models.append(model_name)
-                elif hasattr(model_data, "name"):
-                    models.append(model_data.name)
-                elif hasattr(model_data, "model"):
-                    models.append(model_data.model)
-                elif isinstance(model_data, str):
-                    models.append(model_data)
-
-            if models:
-                selected_idx = 0
-                if st.session_state.selected_model in models:
-                    selected_idx = models.index(st.session_state.selected_model)
-
-                model = st.sidebar.selectbox(
-                    "Select Model",
-                    models,
-                    index=selected_idx,
-                    key="sidebar_model_select",
-                )
-                st.session_state.selected_model = model
-            else:
-                st.sidebar.warning(
-                    "No models available despite API response. Please check Ollama."
-                )
-        else:
-            st.sidebar.warning(
-                "No models available. Please pull models from the Models page."
-            )
+        # Render the model selector in the sidebar
+        self.model_selector.render()
 
         # System prompt
         st.sidebar.subheader("System Prompt")
@@ -431,112 +369,8 @@ class ChatPage:
         if temperature != st.session_state.chat_temperature:
             st.session_state.chat_temperature = temperature
 
-        # Tools settings
-        st.sidebar.subheader("Tools")
-
-        # Custom tools
-        use_tools = st.sidebar.checkbox(
-            "Enable Custom Tools",
-            value=st.session_state.use_tools,
-            help="Enable tools created in the Tools page",
-            key="enable_custom_tools",
-        )
-        if use_tools != st.session_state.use_tools:
-            st.session_state.use_tools = use_tools
-            # Disable installed tools if custom tools are enabled
-            if use_tools:
-                st.session_state.use_installed_tools = False
-
-        # Installed tools
-        use_installed_tools = st.sidebar.checkbox(
-            "Enable Installed Tools",
-            value=st.session_state.use_installed_tools,
-            help="Enable tools installed in the tools directory",
-            key="enable_installed_tools",
-        )
-        if use_installed_tools != st.session_state.use_installed_tools:
-            st.session_state.use_installed_tools = use_installed_tools
-            # Disable custom tools if installed tools are enabled
-            if use_installed_tools:
-                st.session_state.use_tools = False
-
-        # Show available tools based on selection
-        if st.session_state.use_tools:
-            # Tool selector - only show if tools exist
-            if "tools" in st.session_state and st.session_state.tools:
-                st.sidebar.write(f"Available Tools: {len(st.session_state.tools)}")
-
-                # Show tools
-                with st.sidebar.expander("View Available Tools"):
-                    for tool in st.session_state.tools:
-                        tool_name = tool["definition"]["function"]["name"]
-                        st.sidebar.write(f"• {tool_name}")
-
-                # Tool choice option
-                tool_choice = st.sidebar.radio(
-                    "Tool Selection Mode",
-                    ["auto", "none"],
-                    index=0 if st.session_state.tool_choice == "auto" else 1,
-                    help="'auto' lets the model decide when to use tools, 'none' disables tools",
-                    key="tool_choice_custom",
-                )
-                if tool_choice != st.session_state.tool_choice:
-                    st.session_state.tool_choice = tool_choice
-            else:
-                st.sidebar.warning(
-                    "No tools created yet. Go to the Tools page to create tools."
-                )
-        elif st.session_state.use_installed_tools:
-            # Load installed tools if needed
-            if not st.session_state.installed_tools:
-                self.load_installed_tools()
-
-            # Show installed tools
-            if st.session_state.installed_tools:
-                st.sidebar.write(
-                    f"Installed Tools: {len(st.session_state.installed_tools)}"
-                )
-
-                # Show tools
-                with st.sidebar.expander("View Installed Tools"):
-                    for i, tool in enumerate(st.session_state.installed_tools):
-                        if callable(tool):
-                            # Function reference
-                            tool_name = tool.__name__
-                            description = (
-                                getattr(tool, "__doc__", "").split("\n")[0]
-                                if getattr(tool, "__doc__", "")
-                                else f"Function {tool_name}"
-                            )
-                        else:
-                            # Dictionary tool definition
-                            tool_name = tool["function"]["name"]
-                            description = tool["function"]["description"]
-                        st.sidebar.write(f"• **{tool_name}**: {description[:50]}...")
-
-                # Tool choice option
-                tool_choice = st.sidebar.radio(
-                    "Tool Selection Mode",
-                    ["auto", "none"],
-                    index=0 if st.session_state.tool_choice == "auto" else 1,
-                    help="'auto' lets the model decide when to use tools, 'none' disables tools",
-                    key="tool_choice_installed",
-                )
-                if tool_choice != st.session_state.tool_choice:
-                    st.session_state.tool_choice = tool_choice
-
-                # Refresh tools button
-                if st.sidebar.button(
-                    "Refresh Installed Tools", key="refresh_tools_btn"
-                ):
-                    self.load_installed_tools()
-                    st.sidebar.success(
-                        f"Loaded {len(st.session_state.installed_tools)} tools"
-                    )
-            else:
-                st.sidebar.warning(
-                    "No tools installed. Go to the Tools page to install tools."
-                )
+        # Render the tool selector in compact mode
+        self.tool_selector.render_tool_selection(compact=True)
 
         # Chat actions
         st.sidebar.subheader("Actions")
@@ -548,10 +382,6 @@ class ChatPage:
         """Render the chat page"""
         st.title("Ollama Chat")
         st.write("Chat with your installed Ollama models")
-
-        # Fetch available models and update session state
-        models = OllamaAPI.get_local_models()
-        st.session_state.available_models = models
 
         # Render the sidebar
         self.render_sidebar()
