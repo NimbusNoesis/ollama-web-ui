@@ -1,4 +1,3 @@
-import logging
 import re
 import time
 from typing import Any, Dict, Generator, List, Optional, TypedDict, Union
@@ -6,6 +5,8 @@ from typing import Any, Dict, Generator, List, Optional, TypedDict, Union
 import ollama
 import requests
 import streamlit as st
+
+from ..utils.logger import get_logger, exception_handler, ErrorHandler
 
 
 class ProgressResponse(TypedDict, total=False):
@@ -15,34 +16,32 @@ class ProgressResponse(TypedDict, total=False):
     error: str
 
 
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
-)
+# Get application logger
+logger = get_logger()
 
 
 class OllamaAPI:
     """Class to handle all interactions with the Ollama API"""
 
     @staticmethod
+    @exception_handler
     def check_connection() -> bool:
         """Check if Ollama is running and accessible"""
         try:
             ollama.list()
             return True
         except Exception as e:
-            logging.error(f"Ollama connection failed: {str(e)}", exc_info=True)
+            logger.error(f"Ollama connection failed: {str(e)}", exc_info=True)
             return False
 
     @staticmethod
     def get_local_models() -> List[Dict[str, Any]]:
         """Get all local models"""
-        try:
-            models = ollama.list()
-            return models.get("models", [])
-        except Exception as e:
-            logging.error(f"Failed to fetch models: {str(e)}", exc_info=True)
-            return []
+        return ErrorHandler.try_execute(
+            ollama.list,
+            error_context="Failed to fetch models",
+            default_return={"models": []},
+        ).get("models", [])
 
     @staticmethod
     def pull_model(model_name: str) -> bool:
@@ -50,12 +49,12 @@ class OllamaAPI:
         try:
             # Validate model name
             if not model_name or not model_name.strip():
-                logging.error("Model name cannot be empty")
+                logger.error("Model name cannot be empty")
                 return False
 
             return True
         except Exception as e:
-            logging.error(
+            logger.error(
                 f"Error preparing to pull model {model_name}: {str(e)}", exc_info=True
             )
             return False
@@ -71,67 +70,69 @@ class OllamaAPI:
                     total=progress.get("total", 0),
                 )
         except Exception as e:
-            logging.error(f"Error pulling model {model_name}: {str(e)}", exc_info=True)
+            error_msg = f"Error pulling model {model_name}: {str(e)}"
+            logger.error(error_msg, exc_info=True)
             yield {"error": str(e)}
 
     @staticmethod
     def delete_model(model_name: str) -> bool:
         """Delete a model"""
-        try:
-            ollama.delete(model_name)
-            return True
-        except Exception as e:
-            logging.error(f"Error deleting model {model_name}: {str(e)}", exc_info=True)
-            return False
+        return (
+            ErrorHandler.try_execute(
+                ollama.delete,
+                model_name,
+                error_context=f"Error deleting model {model_name}",
+                default_return=False,
+            )
+            is not None
+        )
 
     @staticmethod
     def get_model_info(model_name: str) -> Dict[str, Any]:
         """Get info about a model"""
-        try:
-            model_info = ollama.show(model_name)
-            return dict(model_info)
-        except Exception as e:
-            logging.error(
-                f"Error getting info for model {model_name}: {str(e)}", exc_info=True
-            )
-            return {}
+        return ErrorHandler.try_execute(
+            ollama.show,
+            model_name,
+            error_context=f"Error getting info for model {model_name}",
+            default_return={},
+        )
 
     @staticmethod
     def search_models(query: str) -> List[Dict[str, Any]]:
-        """Search for models from Ollama library"""
-        try:
-            # Check if we have cached models data and if it's still valid
-            if "models_cache" in st.session_state and "cache_time" in st.session_state:
-                # Check if cache is less than 1 hour old
-                cache_age = time.time() - st.session_state.cache_time
-                if cache_age < 3600:  # 3600 seconds = 1 hour
-                    logging.info(
-                        f"Using cached models data ({int(cache_age)} seconds old)"
-                    )
-                    models_data = st.session_state.models_cache
+        """
+        Search for models in the Ollama library
 
-                    # Filter models based on the search query
-                    results = []
-                    query_lower = query.lower().strip()
+        Args:
+            query: Search query
 
-                    for model in models_data:
-                        if (
-                            query_lower in model["name"].lower()
-                            or query_lower in model["tags"].lower()
-                        ):
-                            results.append(model)
+        Returns:
+            List of model dictionaries
+        """
+        # Check if we have cached results
+        if (
+            "models_cache" in st.session_state
+            and "cache_time" in st.session_state
+            and time.time() - st.session_state.cache_time < 3600  # 1 hour cache
+        ):
+            logger.info("Using cached models data")
+            models_data = st.session_state.models_cache
 
-                    if results:
-                        return results
-                    logging.info(
-                        "No matches found in cached data, proceeding with fallback"
-                    )
+            # Filter models based on the search query
+            results = []
+            query_lower = query.lower().strip()
 
-            # If no cache or no results from cache, fetch from ollama.com
+            for model in models_data:
+                if (
+                    query_lower in model["name"].lower()
+                    or query_lower in model["tags"].lower()
+                ):
+                    results.append(model)
+
+            return results
+        else:
+            # Fetch fresh data
+            logger.info(f"Fetching models with query: {query}")
             return OllamaAPI._fetch_models_from_web(query)
-        except Exception as e:
-            logging.error("Error searching models: %s", str(e), exc_info=True)
-            return []
 
     @staticmethod
     def _fetch_models_from_web(query: str) -> List[Dict[str, Any]]:
@@ -143,30 +144,30 @@ class OllamaAPI:
             "Connection": "keep-alive",
         }
 
-        logging.info("Fetching models from ollama.com/library...")
+        logger.info("Fetching models from ollama.com/library...")
         models_response = requests.get(
             "https://ollama.com/library", headers=headers, timeout=10
         )
-        logging.info("Initial response status: %s", models_response.status_code)
+        logger.info("Initial response status: %s", models_response.status_code)
 
         if models_response.status_code == 200:
             model_links = re.findall(r'href="/library/([^"]+)', models_response.text)
-            logging.info("Found %d model links", len(model_links))
+            logger.info("Found %d model links", len(model_links))
 
             if model_links:
                 model_names = [link for link in model_links if link]
-                logging.info(f"Processing models: {model_names}")
+                logger.info(f"Processing models: {model_names}")
 
                 models_data = []
                 for name in model_names:
                     try:
-                        logging.info(f"Fetching tags for {name}...")
+                        logger.info(f"Fetching tags for {name}...")
                         tags_response = requests.get(
                             f"https://ollama.com/library/{name}/tags",
                             headers=headers,
                             timeout=10,
                         )
-                        logging.info(
+                        logger.info(
                             "Tags response status for %s: %s",
                             name,
                             tags_response.status_code,
@@ -184,9 +185,7 @@ class OllamaAPI:
                             model_type = (
                                 "vision"
                                 if "vision" in name
-                                else "embedding"
-                                if "minilm" in name
-                                else "text"
+                                else "embedding" if "minilm" in name else "text"
                             )
 
                             # Extract tags for display
@@ -207,19 +206,19 @@ class OllamaAPI:
                                     "variants": filtered_tags,
                                 }
                             )
-                            logging.info("Successfully processed %s", name)
+                            logger.info("Successfully processed %s", name)
                         else:
-                            logging.warning("Failed to get tags for %s", name)
+                            logger.warning("Failed to get tags for %s", name)
                     except Exception as e:
-                        logging.error("Error processing %s: %s", name, str(e))
+                        logger.error("Error processing %s: %s", name, str(e))
                         continue
 
-                logging.info("Fetched and stored %d models", len(models_data))
+                logger.info("Fetched and stored %d models", len(models_data))
 
                 # Cache the models data with current timestamp
                 st.session_state.models_cache = models_data
                 st.session_state.cache_time = time.time()
-                logging.info("Models data cached successfully")
+                logger.info("Models data cached successfully")
 
                 # Filter models based on the search query
                 results = []
