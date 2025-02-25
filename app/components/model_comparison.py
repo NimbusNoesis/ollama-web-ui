@@ -1,5 +1,6 @@
+from typing import Any, Callable, Dict, List
+
 import streamlit as st
-from typing import List, Dict, Any, Optional, Callable
 
 
 class ModelComparison:

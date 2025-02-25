@@ -1,7 +1,9 @@
-import streamlit as st
-import pandas as pd
 import time
-from typing import Dict, List, Any, Optional
+from typing import Any, Dict, List
+
+import pandas as pd
+import streamlit as st
+
 from app.api.ollama_api import OllamaAPI
 
 
@@ -78,7 +80,9 @@ class ModelsPage:
                         )
                     else:
                         with st.spinner(f"Deleting {selected_model}..."):
-                            if selected_model is not None and OllamaAPI.delete_model(str(selected_model)):
+                            if selected_model is not None and OllamaAPI.delete_model(
+                                str(selected_model)
+                            ):
                                 st.success(f"Successfully deleted {selected_model}")
                                 st.session_state.confirm_delete = None
                                 time.sleep(1)
@@ -172,8 +176,6 @@ class ModelsPage:
             return
 
         model_name = st.session_state.download_model_name
-
-        # Create a full-width container at the top level
         overlay_container = st.container()
 
         with overlay_container:
@@ -187,11 +189,16 @@ class ModelsPage:
                             status.update(label=f"Status: {progress['status']}")
 
                         if "completed" in progress and "total" in progress:
-                            percent = progress["completed"] / progress["total"]
-                            progress_bar.progress(percent)
-                            status.update(
-                                label=f"Downloaded: {int(percent * 100)}% of {model_name}"
-                            )
+                            # Add safety check for zero division
+                            total = progress["total"]
+                            if total > 0:  # Only calculate percent if total is positive
+                                percent = progress["completed"] / total
+                                progress_bar.progress(percent)
+                                status.update(
+                                    label=f"Downloaded: {int(percent * 100)}% of {model_name}"
+                                )
+                            else:
+                                status.update(label=f"Preparing download: {model_name}")
 
                     # Mark download as complete
                     progress_bar.progress(1.0)
@@ -267,17 +274,16 @@ class ModelsPage:
 
             # Rerun to show the overlay immediately
             st.rerun()
-
-            return True
         except Exception as e:
             error_msg = f"Error preparing to pull model {model_name}: {str(e)}"
             st.error(error_msg)
             return False
 
     def render_search_tab(self):
-        """Render the search tab UI"""
+        """Render the search tab UI with default model listing"""
         st.subheader("Search for Models")
 
+        # Search input and controls
         search_tab_query = st.text_input(
             "Search term",
             placeholder="e.g., code, vision, small",
@@ -295,18 +301,20 @@ class ModelsPage:
             filter_options = ["All", "Code", "Vision", "Small", "Medium", "Large"]
             selected_filter = st.selectbox("Filter by category", filter_options)
 
-        # Display search results in a nicer format
-        if (
-            "search_results_tab" in st.session_state
-            and st.session_state.search_results_tab
-        ):
-            results = st.session_state.search_results_tab
+        # Initialize or get search results
+        if "search_results_tab" not in st.session_state:
+            with st.spinner("Loading available models..."):
+                # Get all models by using an empty search
+                st.session_state.search_results_tab = OllamaAPI.search_models("")
 
-            # Apply filter if selected
-            if selected_filter != "All":
-                filter_term = selected_filter.lower()
-                results = [r for r in results if filter_term in r["tags"].lower()]
+        results = st.session_state.search_results_tab
 
+        # Apply filter if selected
+        if selected_filter != "All":
+            filter_term = selected_filter.lower()
+            results = [r for r in results if filter_term in r["tags"].lower()]
+
+        if results:
             st.write(f"Found {len(results)} models:")
 
             # Create a grid of cards for search results
@@ -330,7 +338,7 @@ class ModelsPage:
                                 else:
                                     st.error("Invalid model name")
         else:
-            st.info("Enter a search term and click 'Search' to find models")
+            st.info("No models found matching your criteria")
 
     def render(self):
         """Render the models page"""

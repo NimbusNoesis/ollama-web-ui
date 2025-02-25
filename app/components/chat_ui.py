@@ -1,7 +1,7 @@
-import streamlit as st
-import markdown
-from typing import List, Dict, Any, Optional, Callable
 import time
+from typing import Any, Callable, Dict, List, Optional
+
+import streamlit as st
 
 
 class ChatUI:
