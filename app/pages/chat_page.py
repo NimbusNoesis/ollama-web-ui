@@ -4,6 +4,10 @@ from typing import Dict, List, Any, Optional, cast, Union
 from app.api.ollama_api import OllamaAPI
 from app.components.chat_ui import ChatUI
 from app.utils.chat_manager import ChatManager
+from app.utils.logger import get_logger, exception_handler, ErrorHandler
+
+# Get application logger
+logger = get_logger()
 
 
 class ChatPage:
@@ -59,6 +63,7 @@ class ChatPage:
         """Handle model response when thinking state is active"""
         if not st.session_state.thinking:
             return
+
         try:
             # Get the model and messages
             model = st.session_state.selected_model
@@ -70,19 +75,28 @@ class ChatPage:
             )
             temperature = st.session_state.chat_temperature
 
+            logger.info(f"Sending chat request to model: {model}")
+
             # Get model response
-            response_text = ""
-            result = OllamaAPI.chat_completion(
+            result = ErrorHandler.try_execute(
+                OllamaAPI.chat_completion,
                 model=model,
                 messages=cast(List[Dict[str, Union[str, List[Any]]]], messages),
                 system=system,
                 temperature=temperature,
                 stream=True,
+                error_context=f"Error getting response from model {model}",
+                raise_error=True,
             )
 
             # Add the response to chat history
             self.chat_manager.add_message("assistant", result.message.content or "")
+            logger.info(f"Received response from model: {model}")
+
         except Exception as e:
+            # Log the error
+            logger.error(f"Chat completion error: {str(e)}", exc_info=True)
+
             # Add error message to chat
             error_message = f"Error: {str(e)}"
             self.chat_manager.add_message("system", error_message)
