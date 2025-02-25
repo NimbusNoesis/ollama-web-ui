@@ -170,4 +170,7 @@ cython_debug/
 # PyPI configuration file
 .pypirc
 
-app/data/*
+app/data/chats/*
+app/data/logs/*
+
+tools/*

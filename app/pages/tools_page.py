@@ -4,6 +4,7 @@ import uuid
 from typing import Dict, List, Any, Optional
 from app.api.ollama_api import OllamaAPI
 from app.utils.logger import get_logger
+from app.utils.tool_loader import ToolLoader
 
 # Get application logger
 logger = get_logger()
@@ -276,36 +277,80 @@ class ToolsPage:
                     # Rerun to update the UI
                     st.rerun()
 
-    def render_tool_list(self):
-        """Render the list of available tools"""
+    def render_combined_tools_list(self):
+        """Render installed tools"""
         st.subheader("Your Tools")
 
-        if not st.session_state.tools:
+        # Get list of installed tools
+        installed_tools = ToolLoader.list_available_tools()
+
+        if not installed_tools:
             st.info(
-                "You haven't created any tools yet. Use the tool editor to create one."
+                "No tools are currently installed. Generate and install tools to use them in chats."
             )
-            return
+        else:
+            st.write(
+                "The following tools are installed and available for use in chats:"
+            )
 
-        for tool in st.session_state.tools:
-            tool_name = tool["definition"]["function"]["name"]
-            col1, col2, col3 = st.columns([3, 1, 1])
+            for tool_name in installed_tools:
+                function, definition = ToolLoader.load_tool_function(tool_name)
 
-            with col1:
-                st.write(
-                    f"**{tool_name}**: {tool['definition']['function']['description']}"
-                )
+                if definition:
+                    with st.expander(
+                        f"{tool_name}: {definition['function']['description']}"
+                    ):
+                        st.json(definition)
 
-            with col2:
-                if st.button("Edit", key=f"edit_{tool['id']}"):
-                    st.session_state.selected_tool = tool["id"]
-                    st.rerun()
+                        # Add test section
+                        st.subheader("Test Tool")
+                        parameters = {}
+                        properties = definition["function"]["parameters"]["properties"]
+                        required = definition["function"]["parameters"].get(
+                            "required", []
+                        )
 
-            with col3:
-                if st.button("Delete", key=f"delete_{tool['id']}"):
-                    self.delete_tool(tool["id"])
-                    st.rerun()
+                        # Create input fields for each parameter
+                        for param_name, param_info in properties.items():
+                            param_type = param_info.get("type", "string")
+                            param_desc = param_info.get("description", "")
 
-            st.markdown("---")
+                            if param_type == "string":
+                                parameters[param_name] = st.text_input(
+                                    f"{param_name} ({param_desc})",
+                                    key=f"param_{tool_name}_{param_name}",
+                                )
+                            elif param_type == "number" or param_type == "integer":
+                                parameters[param_name] = st.number_input(
+                                    f"{param_name} ({param_desc})",
+                                    key=f"param_{tool_name}_{param_name}",
+                                )
+                            elif param_type == "boolean":
+                                parameters[param_name] = st.checkbox(
+                                    f"{param_name} ({param_desc})",
+                                    key=f"param_{tool_name}_{param_name}",
+                                )
+
+                        # Execute button outside of a form
+                        if st.button("Execute Tool", key=f"execute_{tool_name}"):
+                            # Validate required parameters
+                            missing_params = [
+                                p for p in required if not parameters.get(p)
+                            ]
+                            if missing_params:
+                                st.error(
+                                    f"Missing required parameters: {', '.join(missing_params)}"
+                                )
+                            else:
+                                # Execute the tool
+                                with st.spinner("Executing tool..."):
+                                    result = ToolLoader.execute_tool(
+                                        tool_name, parameters
+                                    )
+                                st.write("Result:")
+                                st.json(result)
+                else:
+                    st.warning(f"Tool definition for {tool_name} could not be loaded.")
 
     def render_tool_export(self):
         """Render the tool export section"""
@@ -420,6 +465,334 @@ class ToolsPage:
             """
             )
 
+    def generate_tool_implementation(self, tool_data: Dict[str, Any]) -> str:
+        """
+        Generate Python code implementation for a tool
+
+        Args:
+            tool_data: The tool definition data
+
+        Returns:
+            Python code implementing the tool function
+        """
+        function_name = tool_data["function"]["name"]
+        description = tool_data["function"]["description"]
+        parameters = tool_data["function"]["parameters"]["properties"]
+        required_params = tool_data["function"]["parameters"].get("required", [])
+
+        # Start building the function
+        code = f"def {function_name}("
+
+        # Add parameters
+        param_list = []
+        for param_name, param_info in parameters.items():
+            param_type = param_info.get("type", "Any")
+
+            # Map JSON schema types to Python types
+            type_mapping = {
+                "string": "str",
+                "number": "float",
+                "integer": "int",
+                "boolean": "bool",
+                "array": "List[Any]",
+                "object": "Dict[str, Any]",
+            }
+
+            python_type = type_mapping.get(param_type, "Any")
+
+            # Add default value None for optional parameters
+            if param_name in required_params:
+                param_list.append(f"{param_name}: {python_type}")
+            else:
+                param_list.append(f"{param_name}: Optional[{python_type}] = None")
+
+        code += ", ".join(param_list) + ") -> Any:\n"
+
+        # Add docstring
+        code += f'    """{description}\n\n'
+        code += f"    Args:\n"
+        for param_name, param_info in parameters.items():
+            param_desc = param_info.get("description", "")
+            code += f"        {param_name}: {param_desc}\n"
+
+        code += '\n    Returns:\n        Result of the tool execution\n    """\n'
+
+        # Add placeholder implementation
+        code += "    # TODO: Implement the actual tool functionality\n"
+
+        # Basic implementation based on parameter types
+        code += "    try:\n"
+
+        # Add parameter validation for required parameters
+        for param_name in required_params:
+            code += f"        if {param_name} is None:\n"
+            code += f'            raise ValueError(f"{param_name} is required")\n'
+
+        # Add placeholder implementation based on tool type
+        if function_name == "web_search":
+            code += """        # Example implementation using requests
+        import requests
+
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+        }
+        response = requests.get(
+            f"https://api.search.example.com?q={query}",
+            headers=headers
+        )
+
+        if response.status_code == 200:
+            return response.json()
+        else:
+            return {"error": f"Search failed with status code {response.status_code}"}
+"""
+        elif function_name == "calculator":
+            code += """        # Example implementation
+        import ast
+        import operator
+        import math
+
+        # Define safe operations
+        safe_operators = {
+            ast.Add: operator.add,
+            ast.Sub: operator.sub,
+            ast.Mult: operator.mul,
+            ast.Div: operator.truediv,
+            ast.Pow: operator.pow,
+            ast.BitXor: operator.xor,
+            ast.USub: operator.neg,
+            ast.Mod: operator.mod,
+        }
+
+        # Define allowed constants
+        math_constants = {
+            "pi": math.pi,
+            "e": math.e,
+            "tau": math.tau,
+        }
+
+        def safe_eval(expr):
+            return eval_(ast.parse(expr, mode='eval').body)
+
+        def eval_(node):
+            if isinstance(node, ast.Num):
+                return node.n
+            elif isinstance(node, ast.Constant):
+                return node.value
+            elif isinstance(node, ast.Name):
+                if node.id in math_constants:
+                    return math_constants[node.id]
+                raise ValueError(f"Unknown variable: {node.id}")
+            elif isinstance(node, ast.BinOp):
+                op_type = type(node.op)
+                if op_type not in safe_operators:
+                    raise ValueError(f"Unsupported operation: {node.op.__class__.__name__}")
+                return safe_operators[op_type](eval_(node.left), eval_(node.right))
+            elif isinstance(node, ast.UnaryOp):
+                op_type = type(node.op)
+                if op_type not in safe_operators:
+                    raise ValueError(f"Unsupported operation: {node.op.__class__.__name__}")
+                return safe_operators[op_type](eval_(node.operand))
+            elif isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
+                func_name = node.func.id
+                if not hasattr(math, func_name):
+                    raise ValueError(f"Unknown math function: {func_name}")
+
+                args = [eval_(arg) for arg in node.args]
+                return getattr(math, func_name)(*args)
+            else:
+                raise ValueError(f"Unsupported expression type: {type(node).__name__}")
+
+        result = safe_eval(expression)
+        return {"result": result}
+"""
+        elif function_name == "get_weather":
+            code += """        # Example implementation using a weather API
+        import requests
+
+        api_key = "YOUR_WEATHER_API_KEY"  # Replace with actual API key
+        units_param = "metric" if units == "celsius" else "imperial"
+
+        url = f"https://api.weather.example.com/data/2.5/weather?q={location}&units={units_param}&appid={api_key}"
+        response = requests.get(url)
+
+        if response.status_code == 200:
+            data = response.json()
+            return {
+                "location": location,
+                "temperature": data["main"]["temp"],
+                "conditions": data["weather"][0]["description"],
+                "humidity": data["main"]["humidity"],
+                "wind_speed": data["wind"]["speed"]
+            }
+        else:
+            return {"error": f"Failed to get weather data: {response.status_code}"}
+"""
+        else:
+            # Generic implementation for other tool types
+            code += """        # Implement your tool logic here
+        # This is a placeholder implementation
+        result = {
+            "status": "success",
+            "message": "Tool executed successfully",
+            "data": {
+"""
+            # Add parameters as part of the result
+            for param_name in parameters.keys():
+                code += f'                "{param_name}": {param_name},\n'
+
+            code += """            }
+        }
+        return result
+"""
+
+        # Add exception handling
+        code += """    except Exception as e:
+        # Handle exceptions appropriately
+        return {"error": str(e)}
+"""
+
+        # Add usage example
+        code += "\n\n# Example usage:\n"
+        example_args = []
+        for param_name, param_info in parameters.items():
+            param_type = param_info.get("type", "")
+
+            if param_type == "string":
+                example_args.append(f'{param_name}="example"')
+            elif param_type == "number" or param_type == "integer":
+                example_args.append(f"{param_name}=123")
+            elif param_type == "boolean":
+                example_args.append(f"{param_name}=True")
+            elif param_type == "array":
+                example_args.append(f'{param_name}=["item1", "item2"]')
+            elif param_type == "object":
+                example_args.append(f'{param_name}={{"key": "value"}}')
+            else:
+                example_args.append(f'{param_name}="value"')
+
+        code += f"# result = {function_name}({', '.join(example_args)})\n"
+
+        return code
+
+    def render_code_generator(self):
+        """Render the code generator section"""
+        st.subheader("Tool Implementation Generator")
+
+        if not st.session_state.tools:
+            st.info("Create some tools before generating implementation code")
+            return
+
+        # Tool selection
+        tool_options = ["Select a tool..."] + [
+            tool["definition"]["function"]["name"] for tool in st.session_state.tools
+        ]
+
+        selected_tool_name = st.selectbox(
+            "Choose a tool to generate implementation for", tool_options
+        )
+
+        if selected_tool_name == "Select a tool...":
+            st.info("Please select a tool to generate implementation code")
+            return
+
+        # Find the selected tool data
+        selected_tool_data = None
+        for tool in st.session_state.tools:
+            if tool["definition"]["function"]["name"] == selected_tool_name:
+                selected_tool_data = tool["definition"]
+                break
+
+        if selected_tool_data:
+            # Generate the implementation code
+            implementation_code = self.generate_tool_implementation(selected_tool_data)
+
+            # Display the code
+            st.code(implementation_code, language="python")
+
+            # Add download button
+            st.download_button(
+                label="Download Implementation",
+                data=implementation_code,
+                file_name=f"{selected_tool_name}_implementation.py",
+                mime="text/plain",
+            )
+
+            # Add button to save to tools directory
+            col1, col2 = st.columns(2)
+
+            with col1:
+                if st.button(
+                    "Install Tool to App", key=f"install_{selected_tool_name}"
+                ):
+                    # Save the implementation to the tools directory
+                    py_path = ToolLoader.save_tool_implementation(
+                        selected_tool_name, implementation_code
+                    )
+
+                    # Save the definition to the tools directory
+                    json_path = ToolLoader.save_tool_definition(
+                        selected_tool_name, selected_tool_data
+                    )
+
+                    st.success(f"Installed tool to {py_path} and {json_path}")
+
+            # Show integration example
+            with st.expander("How to Use This Implementation"):
+                st.markdown(
+                    f"""
+                ### Using the {selected_tool_name} Tool
+
+                1. Save the implementation to a Python file (e.g., `{selected_tool_name}.py`)
+                2. Import the function in your code
+                3. Use it with Ollama's tool calling feature
+
+                ```python
+                from {selected_tool_name} import {selected_tool_name}
+                import ollama
+                import json
+
+                # Your tool definition
+                tools = [{json.dumps(selected_tool_data, indent=2)}]
+
+                # Chat with Ollama using the tool
+                response = ollama.chat(
+                    model='llama3',  # Use a model that supports tool calling
+                    messages=[
+                        {{'role': 'user', 'content': 'I need help with something that requires {selected_tool_name}'}}
+                    ],
+                    tools=tools,
+                    tool_choice='auto'
+                )
+
+                # Handle tool calls from the model
+                if 'tool_calls' in response['message']:
+                    for tool_call in response['message']['tool_calls']:
+                        if tool_call['function']['name'] == '{selected_tool_name}':
+                            # Parse arguments
+                            arguments = json.loads(tool_call['function']['arguments'])
+
+                            # Execute the function with the provided arguments
+                            result = {selected_tool_name}(**arguments)
+
+                            # Send the result back to the model
+                            ollama.chat(
+                                model='llama3',
+                                messages=[
+                                    # Include previous messages...
+                                    response['message'],
+                                    {{
+                                        'role': 'tool',
+                                        'tool_call_id': tool_call['id'],
+                                        'name': '{selected_tool_name}',
+                                        'content': json.dumps(result)
+                                    }}
+                                ]
+                            )
+                ```
+                """
+                )
+
     def render(self):
         """Render the tools page"""
         st.title("LLM Tools Generator")
@@ -427,15 +800,20 @@ class ToolsPage:
             "Create and manage tools that can be used with Ollama models to extend their capabilities."
         )
 
-        # Layout with tabs
-        tab1, tab2, tab3 = st.tabs(["Tool Editor", "Your Tools", "Export"])
+        # Layout with tabs - merged Your Tools and Installed Tools into one tab
+        tab1, tab2, tab3, tab4 = st.tabs(
+            ["Tool Editor", "Your Tools", "Code Generator", "Export"]
+        )
 
         with tab1:
             self.render_tool_editor()
             self.render_integration_help()
 
         with tab2:
-            self.render_tool_list()
+            self.render_combined_tools_list()
 
         with tab3:
+            self.render_code_generator()
+
+        with tab4:
             self.render_tool_export()

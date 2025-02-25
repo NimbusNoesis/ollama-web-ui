@@ -276,10 +276,10 @@ class ChatManager:
         self, message: Dict[str, Any], chat_id: Optional[str] = None
     ) -> bool:
         """
-        Add a special message to a chat
+        Add a special message (like tool calls) to the chat
 
         Args:
-            message: The special message to add
+            message: Complete message object with role and other properties
             chat_id: ID of chat to add to, or current chat if None
 
         Returns:
@@ -295,6 +295,10 @@ class ChatManager:
         if chat_id not in st.session_state.chats:
             logging.error(f"Invalid chat ID: {chat_id}")
             return False
+
+        # Add timestamp if not present
+        if "timestamp" not in message:
+            message["timestamp"] = datetime.datetime.now().isoformat()
 
         # Add to in-memory chat
         st.session_state.chats[chat_id]["messages"].append(message)

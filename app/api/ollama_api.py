@@ -1,6 +1,6 @@
 import re
 import time
-from typing import Any, Dict, Generator, List, Optional, TypedDict, Union
+from typing import Any, Dict, Generator, List, Optional, TypedDict, Union, Callable
 
 import ollama
 import requests
@@ -37,11 +37,34 @@ class OllamaAPI:
     @staticmethod
     def get_local_models() -> List[Dict[str, Any]]:
         """Get all local models"""
-        return ErrorHandler.try_execute(
+        models_response = ErrorHandler.try_execute(
             ollama.list,
             error_context="Failed to fetch models",
             default_return={"models": []},
-        ).get("models", [])
+        )
+
+        # Get the models list
+        models = models_response.get("models", [])
+
+        # Convert Model objects to dictionaries and ensure 'name' key exists
+        formatted_models = []
+        for model in models:
+            if hasattr(model, "__dict__"):
+                # Convert model object to dict
+                model_dict = model.__dict__.copy() if hasattr(model, "__dict__") else {}
+
+                # If it's a modern API response, ensure name compatibility
+                if hasattr(model, "model") and not model_dict.get("name"):
+                    model_dict["name"] = model.model
+
+                formatted_models.append(model_dict)
+            elif isinstance(model, dict):
+                # If it's already a dict, ensure name key exists
+                if "model" in model and "name" not in model:
+                    model["name"] = model["model"]
+                formatted_models.append(model)
+
+        return formatted_models
 
     @staticmethod
     def pull_model(model_name: str) -> bool:
@@ -293,8 +316,7 @@ class OllamaAPI:
         system: Optional[str] = None,
         temperature: float = 0.7,
         stream: bool = True,
-        tools: Optional[List[Dict[str, Any]]] = None,
-        tool_choice: Optional[str] = None,
+        tools: Optional[Union[List[Dict[str, Any]], List[Callable]]] = None,
     ) -> ollama.ChatResponse:
         """
         Generate a chat completion using Ollama
@@ -305,8 +327,7 @@ class OllamaAPI:
             system: Optional system prompt
             temperature: Temperature for generation (0.0 to 1.0)
             stream: Whether to stream the response
-            tools: Optional list of tools to provide to the model
-            tool_choice: Optional control for tool selection (auto, none, or specific tool)
+            tools: Optional list of tools to provide to the model - can be function references or tool definitions
 
         Returns:
             Either a complete response object or a generator of response chunks
@@ -367,12 +388,155 @@ class OllamaAPI:
 
         # Add tools if provided
         if tools:
+            # Tools can now be function references or traditional dict definitions
+            # The Ollama library will handle function references automatically
             request_params["tools"] = tools
 
-            # Add tool_choice if provided
-            if tool_choice:
-                request_params["tool_choice"] = tool_choice
+        try:
+            # Call Ollama API
+            response = ollama.chat(**request_params)
+            return response
+        except TypeError as e:
+            # If we get a TypeError, it may be due to unsupported parameters
+            error_msg = str(e).lower()
+            logger.warning(f"TypeError in chat completion: {error_msg}")
 
-        # Call Ollama API
-        response = ollama.chat(**request_params)
-        return response
+            # Check if it's due to passing function references to an older version
+            if "tools" in request_params and "unexpected keyword argument" in error_msg:
+                # Try converting function references to tool definitions
+                if isinstance(tools, list) and any(callable(tool) for tool in tools):
+                    logger.warning(
+                        "Trying to convert function references to tool definitions"
+                    )
+                    converted_tools = []
+                    for tool in tools:
+                        if callable(tool):
+                            # Convert function to tool definition
+                            tool_def = OllamaAPI._function_to_tool_definition(tool)
+                            if tool_def:
+                                converted_tools.append(tool_def)
+                        else:
+                            # Keep existing tool definitions
+                            converted_tools.append(tool)
+                    request_params["tools"] = converted_tools
+                    try:
+                        return ollama.chat(**request_params)
+                    except Exception as conv_error:
+                        logger.error(f"Error after converting tools: {str(conv_error)}")
+
+            # Try to remove potentially unsupported parameters and retry
+            if "tool_choice" in request_params and "tool_choice" in error_msg:
+                logger.warning(
+                    f"Removing unsupported parameter 'tool_choice' and retrying: {str(e)}"
+                )
+                del request_params["tool_choice"]
+
+            if "tools" in request_params and (
+                "tools" in error_msg or "tool" in error_msg
+            ):
+                logger.warning(
+                    f"Removing unsupported parameter 'tools' and retrying: {str(e)}"
+                )
+                del request_params["tools"]
+
+            # Retry the call without the problematic parameters
+            return ollama.chat(**request_params)
+
+    @staticmethod
+    def _function_to_tool_definition(func: Callable) -> Optional[Dict[str, Any]]:
+        """
+        Convert a Python function to an Ollama tool definition
+
+        Args:
+            func: The function to convert
+
+        Returns:
+            Tool definition dictionary or None if conversion fails
+        """
+        try:
+            import inspect
+            from typing import get_type_hints
+
+            # Get function signature
+            sig = inspect.signature(func)
+
+            # Get function name
+            func_name = func.__name__
+
+            # Get function docstring
+            doc = inspect.getdoc(func) or ""
+
+            # Extract description from docstring (first line)
+            description = doc.split("\n")[0] if doc else f"Function {func_name}"
+
+            # Get type hints
+            type_hints = get_type_hints(func)
+
+            # Define parameter properties
+            properties = {}
+            required = []
+
+            for param_name, param in sig.parameters.items():
+                # Skip self, cls for methods
+                if (
+                    param_name in ("self", "cls")
+                    and param.kind == param.POSITIONAL_OR_KEYWORD
+                ):
+                    continue
+
+                # Get parameter type
+                param_type = type_hints.get(param_name, None)
+                json_type = "string"  # Default type
+
+                # Map Python types to JSON Schema types
+                if param_type:
+                    if param_type in (int, float):
+                        json_type = "number"
+                    elif param_type == bool:
+                        json_type = "boolean"
+                    elif param_type in (list, set, tuple):
+                        json_type = "array"
+                    elif param_type in (dict, object):
+                        json_type = "object"
+
+                # Extract parameter description from docstring
+                param_desc = ""
+                if doc:
+                    param_section = (
+                        doc.split("Args:")[1].split("Returns:")[0]
+                        if "Args:" in doc and "Returns:" in doc
+                        else ""
+                    )
+                    for line in param_section.split("\n"):
+                        if line.strip().startswith(param_name + ":"):
+                            param_desc = line.split(":", 1)[1].strip()
+                            break
+
+                # Add parameter to properties
+                properties[param_name] = {
+                    "type": json_type,
+                    "description": param_desc or f"Parameter {param_name}",
+                }
+
+                # Check if parameter is required
+                if param.default == param.empty:
+                    required.append(param_name)
+
+            # Create tool definition
+            tool_def = {
+                "type": "function",
+                "function": {
+                    "name": func_name,
+                    "description": description,
+                    "parameters": {
+                        "type": "object",
+                        "properties": properties,
+                        "required": required,
+                    },
+                },
+            }
+
+            return tool_def
+        except Exception as e:
+            logger.error(f"Error converting function to tool definition: {str(e)}")
+            return None
