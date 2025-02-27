@@ -310,3 +310,96 @@ class ChatManager:
         self.save_chat(chat_id)
 
         return True
+
+    def prepare_streaming_message(self, chat_id: Optional[str] = None) -> str:
+        """
+        Prepare a streaming message placeholder in the chat
+
+        Args:
+            chat_id: ID of chat to add to, or current chat if None
+
+        Returns:
+            ID of the prepared message
+        """
+        if not chat_id:
+            chat_id = st.session_state.current_chat_id
+
+        if not chat_id:
+            # Create a new chat if none exists
+            chat_id = self.create_new_chat()
+
+        if chat_id not in st.session_state.chats:
+            logging.error(f"Invalid chat ID: {chat_id}")
+            return ""
+
+        # Create a placeholder message
+        message_id = f"stream_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}"
+        message = {
+            "role": "assistant",
+            "content": "",  # Start empty
+            "timestamp": datetime.datetime.now().isoformat(),
+            "id": message_id,
+            "is_streaming": True,
+        }
+
+        # Add to in-memory chat
+        st.session_state.chats[chat_id]["messages"].append(message)
+        st.session_state.chat_history.append(message)
+
+        # Update timestamp
+        st.session_state.chats[chat_id][
+            "updated_at"
+        ] = datetime.datetime.now().isoformat()
+
+        return message_id
+
+    def finalize_streaming_message(
+        self, content: str, message_id: str, chat_id: Optional[str] = None
+    ) -> bool:
+        """
+        Finalize a streaming message with the complete content
+
+        Args:
+            content: Final message content
+            message_id: ID of the message to update
+            chat_id: ID of chat containing the message, or current chat if None
+
+        Returns:
+            True if successful, False otherwise
+        """
+        if not chat_id:
+            chat_id = st.session_state.current_chat_id
+
+        if not chat_id:
+            logging.error("No active chat found")
+            return False
+
+        if chat_id not in st.session_state.chats:
+            logging.error(f"Invalid chat ID: {chat_id}")
+            return False
+
+        # Find the message by ID
+        found = False
+        for i, message in enumerate(st.session_state.chats[chat_id]["messages"]):
+            if message.get("id") == message_id:
+                # Update the message content
+                st.session_state.chats[chat_id]["messages"][i]["content"] = content
+                st.session_state.chats[chat_id]["messages"][i]["is_streaming"] = False
+                found = True
+                break
+
+        # Also update in chat history
+        if found:
+            for i, message in enumerate(st.session_state.chat_history):
+                if message.get("id") == message_id:
+                    st.session_state.chat_history[i]["content"] = content
+                    st.session_state.chat_history[i]["is_streaming"] = False
+                    break
+
+        # Auto-save chat
+        if found:
+            self.save_chat(chat_id)
+            return True
+        else:
+            logging.error(f"Message with ID {message_id} not found in chat {chat_id}")
+            return False

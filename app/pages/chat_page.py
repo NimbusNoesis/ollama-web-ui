@@ -1,7 +1,7 @@
 import streamlit as st
 import time
 import json
-from typing import Dict, List, Any, Optional, cast, Union
+from typing import Dict, List, Any, Optional, cast, Union, Iterator, TYPE_CHECKING
 from app.api.ollama_api import OllamaAPI
 from app.components.chat_ui import ChatUI
 from app.utils.chat_manager import ChatManager
@@ -10,6 +10,9 @@ from app.utils.logger import get_logger, exception_handler, ErrorHandler
 
 # Get application logger
 logger = get_logger()
+
+# Type aliases to help with type checking
+ResponseType = Any  # Could be ChatResponse, Iterator[str], or dict
 
 
 class ChatPage:
@@ -47,6 +50,13 @@ class ChatPage:
 
         if "installed_tools" not in st.session_state:
             st.session_state.installed_tools = []
+
+        # Initialize streaming related state
+        if "use_streaming" not in st.session_state:
+            st.session_state.use_streaming = True
+
+        if "full_response" not in st.session_state:
+            st.session_state.full_response = ""
 
         # Initialize the chat UI
         self.chat_ui = ChatUI(on_message=self.process_message)
@@ -101,6 +111,13 @@ class ChatPage:
             temperature = st.session_state.chat_temperature
             messages = self.chat_manager.get_messages_for_api()
 
+            # Determine if we can use streaming (only when not using tools)
+            use_streaming = (
+                st.session_state.use_streaming
+                and not st.session_state.use_tools
+                and not st.session_state.use_installed_tools
+            )
+
             # Get tools if needed
             tools = None
             tool_choice = None
@@ -110,6 +127,7 @@ class ChatPage:
                 # User-created tools from the session
                 tools = [tool["definition"] for tool in st.session_state.tools]
                 tool_choice = st.session_state.tool_choice
+                use_streaming = False  # Can't stream with tools
             elif (
                 st.session_state.use_installed_tools
                 and st.session_state.installed_tools
@@ -135,87 +153,246 @@ class ChatPage:
                     tools = (
                         st.session_state.installed_tools
                     )  # Fall back to the old approach
+                use_streaming = False  # Can't stream with tools
 
-            try:
-                # Get model response - try with tools first
-                if tools:
-                    try:
-                        # Ensure tools is definitely the correct type
-                        valid_tools = []
-                        for tool in tools:
-                            if callable(tool) or (
-                                isinstance(tool, dict) and "function" in tool
-                            ):
-                                valid_tools.append(tool)
+            # Handle streaming separately from non-streaming responses
+            if use_streaming:
+                self._handle_streaming_response(
+                    model, messages, system_prompt, temperature
+                )
+            else:
+                self._handle_normal_response(
+                    model,
+                    messages,
+                    system_prompt,
+                    temperature,
+                    tools,
+                    available_functions,
+                    tool_choice,
+                )
 
-                        response = OllamaAPI.chat_completion(
-                            model=model,
-                            messages=messages,
-                            system=system_prompt,
-                            temperature=temperature,
-                            tools=valid_tools,
-                        )
-                    except Exception as e:
-                        # If tools caused an error, try again without tools
-                        logger.warning(
-                            f"Error using tools, falling back to regular chat: {str(e)}"
-                        )
-                        response = OllamaAPI.chat_completion(
-                            model=model,
-                            messages=messages,
-                            system=system_prompt,
-                            temperature=temperature,
-                        )
-                else:
-                    # Regular completion without tools
+        except Exception as e:
+            logger.error(f"Error getting chat response: {str(e)}", exc_info=True)
+            self.chat_manager.add_message(
+                "system",
+                f"❌ Error: {str(e)}\n\nPlease try again or select a different model.",
+            )
+        finally:
+            # Clear thinking state
+            self.chat_ui.remove_thinking_indicator()
+
+    def _handle_streaming_response(self, model, messages, system_prompt, temperature):
+        """
+        Handle streaming response from model
+
+        Args:
+            model: The model to use
+            messages: Message history
+            system_prompt: System prompt
+            temperature: Temperature setting
+        """
+        logger.info("Using streaming mode for response")
+        try:
+            # Start streaming mode in UI
+            self.chat_ui.start_streaming()
+
+            # Prepare a message placeholder in the chat manager
+            message_id = self.chat_manager.prepare_streaming_message()
+
+            # Get streaming response
+            response = OllamaAPI.chat_completion(
+                model=model,
+                messages=messages,
+                system=system_prompt,
+                temperature=temperature,
+                stream=True,
+            )
+
+            # Check if we got a streaming iterator or a regular response
+            # Use duck typing to determine if it's an iterator without message attribute
+            is_iterator = hasattr(response, "__iter__") and not hasattr(
+                response, "message"
+            )
+
+            if not is_iterator:
+                # We got a regular response instead of a streaming iterator
+                logger.warning("Expected streaming response but got a regular one")
+                # Handle it like a regular response
+                content = ""
+                if hasattr(response, "message"):
+                    msg = getattr(response, "message")
+                    if hasattr(msg, "content"):
+                        content = str(getattr(msg, "content", ""))
+                elif isinstance(response, dict) and "message" in response:
+                    content = str(response["message"].get("content", ""))
+
+                if content:
+                    # Finalize the message first to remove streaming flag
+                    self.chat_manager.finalize_streaming_message(content, message_id)
+                    # No need to add another message, we already have one
+                return
+
+            # At this point, we're confident we have an iterator
+            stream_generator = response
+
+            # Collect the full response for saving later
+            full_response = ""
+
+            # Define a wrapper generator that collects the full response
+            def collect_stream():
+                nonlocal full_response
+                for chunk in stream_generator:
+                    if chunk is not None:
+                        chunk_str = str(chunk)
+                        full_response += chunk_str
+                        yield chunk_str
+
+            # Create a container below the last non-streaming message
+            stream_container = st.container()
+            with stream_container:
+                # Render the streaming message in the container
+                self.chat_ui.render_streaming_message(collect_stream())
+
+            # After streaming completes, save the full response and remove streaming flag
+            self.chat_manager.finalize_streaming_message(full_response, message_id)
+
+            # Store full response in session state for reference
+            st.session_state.full_response = full_response
+
+            # Request a rerun after streaming is complete to refresh the UI
+            # This ensures the message appears in the correct place in the chat history
+            st.rerun()
+
+        except Exception as e:
+            logger.error(f"Error in streaming response: {str(e)}")
+            self.chat_manager.add_message(
+                "system",
+                f"❌ Streaming Error: {str(e)}\n\nPlease try again or disable streaming.",
+            )
+        finally:
+            # Clear streaming state
+            self.chat_ui.stop_streaming()
+
+    def _handle_normal_response(
+        self,
+        model,
+        messages,
+        system_prompt,
+        temperature,
+        tools,
+        available_functions,
+        tool_choice,
+    ):
+        """
+        Handle non-streaming response from model
+
+        Args:
+            model: The model to use
+            messages: Message history
+            system_prompt: System prompt
+            temperature: Temperature setting
+            tools: Tools to use
+            available_functions: Available function references
+            tool_choice: Tool choice setting
+        """
+        try:
+            # Get model response - try with tools first
+            if tools:
+                try:
+                    # Ensure tools is definitely the correct type
+                    valid_tools = []
+                    for tool in tools:
+                        if callable(tool) or (
+                            isinstance(tool, dict) and "function" in tool
+                        ):
+                            valid_tools.append(tool)
+
                     response = OllamaAPI.chat_completion(
                         model=model,
                         messages=messages,
                         system=system_prompt,
                         temperature=temperature,
+                        stream=False,
+                        tools=valid_tools,
                     )
-            except Exception as e:
-                # Final fallback - try minimal parameters
-                logger.warning(
-                    f"Error in chat completion, trying minimal parameters: {str(e)}"
-                )
+                except Exception as e:
+                    # If tools caused an error, try again without tools
+                    logger.warning(
+                        f"Error using tools, falling back to regular chat: {str(e)}"
+                    )
+                    response = OllamaAPI.chat_completion(
+                        model=model,
+                        messages=messages,
+                        system=system_prompt,
+                        temperature=temperature,
+                        stream=False,
+                    )
+            else:
+                # Regular completion without tools
                 response = OllamaAPI.chat_completion(
                     model=model,
                     messages=messages,
+                    system=system_prompt,
+                    temperature=temperature,
+                    stream=False,
                 )
-
-            # Add the model's initial response to the chat
-            if hasattr(response, "message") and hasattr(response.message, "content"):
-                # Add the initial response text to chat
-                if response.message.content:
-                    self.chat_manager.add_message(
-                        "assistant", str(response.message.content)
-                    )
-            elif (
-                isinstance(response, dict)
-                and "message" in response
-                and "content" in response["message"]
-            ):
-                # Fallback for dictionary response format
-                if response["message"]["content"]:
-                    self.chat_manager.add_message(
-                        "assistant", str(response["message"]["content"])
-                    )
-
-            # Check for tool calls and process them
-            has_tool_calls = (
-                hasattr(response, "message")
-                and hasattr(response.message, "tool_calls")
-                and response.message.tool_calls
-            ) or (
-                isinstance(response, dict)
-                and "message" in response
-                and "tool_calls" in response["message"]
-                and response["message"]["tool_calls"]
+        except Exception as e:
+            # Final fallback - try minimal parameters
+            logger.warning(
+                f"Error in chat completion, trying minimal parameters: {str(e)}"
+            )
+            response = OllamaAPI.chat_completion(
+                model=model,
+                messages=messages,
+                stream=False,
             )
 
-            if has_tool_calls and st.session_state.use_installed_tools:
-                # Process tool calls using the new helper method
+        # Skip response handling if we somehow got a streaming iterator
+        is_iterator = hasattr(response, "__iter__") and not hasattr(response, "message")
+        if is_iterator:
+            logger.warning("Got a streaming response in non-streaming mode")
+            # Convert the streaming response to a normal response
+            full_text = ""
+            try:
+                for chunk in response:
+                    full_text += str(chunk)
+                self.chat_manager.add_message("assistant", full_text)
+            except Exception as e:
+                logger.error(f"Error processing streaming response: {str(e)}")
+            return
+
+        # Add the model's initial response to the chat
+        response_content = None
+        if hasattr(response, "message"):
+            msg = getattr(response, "message")
+            if hasattr(msg, "content"):
+                response_content = getattr(msg, "content")
+                if response_content:
+                    self.chat_manager.add_message("assistant", str(response_content))
+        elif isinstance(response, dict) and "message" in response:
+            msg_dict = response["message"]
+            if "content" in msg_dict and msg_dict["content"]:
+                self.chat_manager.add_message("assistant", str(msg_dict["content"]))
+
+        # Check for tool calls
+        has_tool_calls = False
+        tool_calls = None
+
+        if hasattr(response, "message"):
+            msg = getattr(response, "message")
+            if hasattr(msg, "tool_calls"):
+                tool_calls = getattr(msg, "tool_calls")
+                has_tool_calls = bool(tool_calls)
+        elif isinstance(response, dict) and "message" in response:
+            msg_dict = response["message"]
+            if "tool_calls" in msg_dict:
+                tool_calls = msg_dict["tool_calls"]
+                has_tool_calls = bool(tool_calls)
+
+        # Process tool calls if needed
+        if has_tool_calls and st.session_state.use_installed_tools:
+            # Process tool calls
+            try:
                 tool_results = OllamaAPI.process_tool_calls(
                     response, available_functions
                 )
@@ -268,102 +445,94 @@ class ChatPage:
                     messages=updated_messages,
                     system=system_prompt,
                     temperature=temperature,
+                    stream=False,
                 )
 
                 # Add the follow-up response to chat
-                if hasattr(follow_up_response, "message") and hasattr(
-                    follow_up_response.message, "content"
-                ):
-                    if follow_up_response.message.content:
-                        self.chat_manager.add_message(
-                            "assistant", str(follow_up_response.message.content)
-                        )
+                if hasattr(follow_up_response, "message"):
+                    msg = getattr(follow_up_response, "message")
+                    if hasattr(msg, "content"):
+                        content = getattr(msg, "content")
+                        if content:
+                            self.chat_manager.add_message("assistant", str(content))
                 elif (
                     isinstance(follow_up_response, dict)
                     and "message" in follow_up_response
                 ):
-                    if follow_up_response["message"].get("content"):
+                    msg_dict = follow_up_response["message"]
+                    if "content" in msg_dict and msg_dict["content"]:
                         self.chat_manager.add_message(
-                            "assistant", str(follow_up_response["message"]["content"])
+                            "assistant", str(msg_dict["content"])
                         )
-
-            elif has_tool_calls and not st.session_state.use_installed_tools:
-                # Simulation mode for tool calls
-                # Handle both object-based and dict-based formats
-                tool_calls = []
-
-                if (
-                    hasattr(response, "message")
-                    and hasattr(response.message, "tool_calls")
-                    and response.message.tool_calls is not None
-                ):
-                    tool_calls = response.message.tool_calls
-                elif (
-                    isinstance(response, dict)
-                    and "message" in response
-                    and "tool_calls" in response["message"]
-                ) and response["message"]["tool_calls"] is not None:
-                    tool_calls = response["message"]["tool_calls"]
-
-                for tool_call in tool_calls:
-                    # Extract function info safely for both dict and object formats
-                    if isinstance(tool_call, dict):
-                        function_name = tool_call.get("function", {}).get(
-                            "name", "unknown_function"
-                        )
-                        arguments = tool_call.get("function", {}).get("arguments", "{}")
-                    else:
-                        function_name = getattr(
-                            getattr(tool_call, "function", {}),
-                            "name",
-                            "unknown_function",
-                        )
-                        arguments = getattr(
-                            getattr(tool_call, "function", {}), "arguments", "{}"
-                        )
-
-                    # Display simulation message
-                    self.chat_manager.add_message(
-                        "system",
-                        f"🛠️ **Tool Call**: `{function_name}`\n\n"
-                        f"*This is a simulation. In a real application, "
-                        f"you would implement the actual function logic and return results.*",
-                    )
-
-                # For simulation, just get a follow-up response with the original messages
-                follow_up_response = OllamaAPI.chat_completion(
-                    model=model,
-                    messages=messages,
-                    system=system_prompt,
-                    temperature=temperature,
+            except Exception as e:
+                logger.error(f"Error processing tool calls: {str(e)}")
+                self.chat_manager.add_message(
+                    "system",
+                    f"❌ **Tool Error**: Failed to process tool calls: {str(e)}",
                 )
 
-                # Add the follow-up response to chat
-                if hasattr(follow_up_response, "message") and hasattr(
-                    follow_up_response.message, "content"
-                ):
-                    if follow_up_response.message.content:
-                        self.chat_manager.add_message(
-                            "assistant", str(follow_up_response.message.content)
-                        )
-                elif (
-                    isinstance(follow_up_response, dict)
-                    and "message" in follow_up_response
-                ):
-                    if follow_up_response["message"].get("content"):
-                        self.chat_manager.add_message(
-                            "assistant", str(follow_up_response["message"]["content"])
-                        )
+        elif has_tool_calls and not st.session_state.use_installed_tools:
+            # Simulation mode for tool calls - handle both object and dict formats
+            tool_calls_list = []
 
-        except Exception as e:
-            logger.error(f"Error getting chat response: {str(e)}", exc_info=True)
-            self.chat_manager.add_message(
-                "system",
-                f"❌ Error: {str(e)}\n\nPlease try again or select a different model.",
+            if tool_calls is not None:
+                if isinstance(tool_calls, list):
+                    tool_calls_list = tool_calls
+                else:
+                    # Try to convert to list if possible
+                    try:
+                        tool_calls_list = list(tool_calls)
+                    except:
+                        # If conversion fails, use empty list
+                        tool_calls_list = []
+
+            for tool_call in tool_calls_list:
+                # Extract function info safely for both dict and object formats
+                function_name = "unknown_function"
+                arguments = "{}"
+
+                if isinstance(tool_call, dict) and "function" in tool_call:
+                    function_info = tool_call["function"]
+                    if isinstance(function_info, dict):
+                        function_name = function_info.get("name", "unknown_function")
+                        arguments = function_info.get("arguments", "{}")
+                elif hasattr(tool_call, "function"):
+                    function_obj = getattr(tool_call, "function")
+                    if hasattr(function_obj, "name"):
+                        function_name = getattr(function_obj, "name")
+                    if hasattr(function_obj, "arguments"):
+                        arguments = getattr(function_obj, "arguments")
+
+                # Display simulation message
+                self.chat_manager.add_message(
+                    "system",
+                    f"🛠️ **Tool Call**: `{function_name}`\n\n"
+                    f"*This is a simulation. In a real application, "
+                    f"you would implement the actual function logic and return results.*",
+                )
+
+            # For simulation, just get a follow-up response with the original messages
+            follow_up_response = OllamaAPI.chat_completion(
+                model=model,
+                messages=messages,
+                system=system_prompt,
+                temperature=temperature,
+                stream=False,
             )
-        finally:
-            # Clear thinking state
-            st.session_state.thinking = False
+
+            # Add the follow-up response to chat
+            if hasattr(follow_up_response, "message"):
+                msg = getattr(follow_up_response, "message")
+                if hasattr(msg, "content"):
+                    content = getattr(msg, "content")
+                    if content:
+                        self.chat_manager.add_message("assistant", str(content))
+            elif (
+                isinstance(follow_up_response, dict) and "message" in follow_up_response
+            ):
+                msg_dict = follow_up_response["message"]
+                if "content" in msg_dict and msg_dict["content"]:
+                    self.chat_manager.add_message("assistant", str(msg_dict["content"]))
 
     def render_sidebar(self):
         """Render the chat sidebar"""
@@ -430,6 +599,17 @@ class ChatPage:
         )
         if temperature != st.session_state.chat_temperature:
             st.session_state.chat_temperature = temperature
+
+        # Streaming settings
+        st.sidebar.subheader("Response Settings")
+        use_streaming = st.sidebar.checkbox(
+            "Enable Streaming",
+            value=st.session_state.use_streaming,
+            help="Stream responses in real-time (disabled when using tools)",
+            key="streaming_checkbox",
+        )
+        if use_streaming != st.session_state.use_streaming:
+            st.session_state.use_streaming = use_streaming
 
         # Tools settings
         st.sidebar.subheader("Tools")

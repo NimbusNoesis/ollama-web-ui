@@ -1,6 +1,16 @@
 import re
 import time
-from typing import Any, Dict, Generator, List, Optional, TypedDict, Union, Callable
+from typing import (
+    Any,
+    Dict,
+    Generator,
+    List,
+    Optional,
+    TypedDict,
+    Union,
+    Callable,
+    Iterator,
+)
 import json
 
 import ollama
@@ -319,7 +329,7 @@ class OllamaAPI:
         temperature: float = 0.7,
         stream: bool = True,
         tools: Any = None,
-    ) -> ollama.ChatResponse:
+    ) -> Union[ollama.ChatResponse, Iterator[str]]:
         """
         Generate a chat completion using Ollama
 
@@ -328,13 +338,14 @@ class OllamaAPI:
             messages: List of message objects with role and content
             system: Optional system prompt
             temperature: Temperature for generation (0.0 to 1.0)
-            stream: Whether to stream the response
+            stream: Whether to stream the response (ignored if tools are used)
             tools: Optional list of tools to provide to the model - can be function references or tool definitions
 
         Returns:
-            Either a complete response object or a generator of response chunks
+            Either a complete response object, a generator of response chunks, or a string iterator for streaming
         """
 
+        # If tools are provided, we can't use streaming as we need to process tool calls
         if tools:
             processed_messages = [
                 {
@@ -352,6 +363,7 @@ class OllamaAPI:
                 messages=processed_messages,
                 tools=tools,
             )
+            return response
         else:
             # If system prompt is provided, add it as a system message at the beginning
             messages_with_system = messages.copy()
@@ -399,13 +411,71 @@ class OllamaAPI:
             # Set up options
             options = {"temperature": temperature}
 
-            response = chat(
-                model=model,
-                messages=processed_messages,
-                options=options,
-            )
+            # Handle streaming vs non-streaming
+            if stream:
+                return OllamaAPI.stream_chat_completion(
+                    model, processed_messages, options
+                )
+            else:
+                response = chat(
+                    model=model,
+                    messages=processed_messages,
+                    options=options,
+                )
+                return response
 
-        return response
+    @staticmethod
+    def stream_chat_completion(
+        model: str, messages: List[Dict[str, str]], options: Dict[str, Any]
+    ) -> Iterator[str]:
+        """
+        Stream chat completion from Ollama
+
+        Args:
+            model: The model to use for chat
+            messages: Processed messages list
+            options: Generation options
+
+        Returns:
+            Iterator that yields text chunks as they are generated
+        """
+        logger.info(f"Starting streaming response with model {model}")
+
+        # Create a generator that yields text chunks
+        def message_generator() -> Iterator[str]:
+            try:
+                # Use ollama's stream feature
+                for chunk in chat(
+                    model=model,
+                    messages=messages,
+                    options=options,
+                    stream=True,
+                ):
+                    # Handle different response formats and ensure we always yield strings
+                    if hasattr(chunk, "message") and hasattr(chunk.message, "content"):
+                        content = chunk.message.content
+                        if content:
+                            yield str(content)
+                    elif (
+                        isinstance(chunk, dict)
+                        and "message" in chunk
+                        and "content" in chunk["message"]
+                    ):
+                        content = chunk["message"]["content"]
+                        if content:
+                            yield str(content)
+                    else:
+                        # Unexpected chunk format, convert to string if possible
+                        try:
+                            yield str(chunk)
+                        except:
+                            # If we can't convert it to a string, yield nothing
+                            pass
+            except Exception as e:
+                logger.error(f"Error in streaming response: {str(e)}")
+                yield f"\n\n*Error: {str(e)}*"
+
+        return message_generator()
 
     @staticmethod
     def _function_to_tool_definition(func: Callable) -> Optional[Dict[str, Any]]:
@@ -457,7 +527,7 @@ class OllamaAPI:
                 if param_type:
                     if param_type in (int, float):
                         json_type = "number"
-                    elif param_type == bool:
+                    elif param_type is bool:
                         json_type = "boolean"
                     elif param_type in (list, set, tuple):
                         json_type = "array"
@@ -508,7 +578,7 @@ class OllamaAPI:
 
     @staticmethod
     def process_tool_calls(
-        response: ollama.ChatResponse, available_functions: Dict[str, Callable]
+        response: Any, available_functions: Dict[str, Callable]
     ) -> Dict[str, Any]:
         """
         Process tool calls from Ollama response
@@ -523,24 +593,52 @@ class OllamaAPI:
         results = {}
 
         # Check if response has tool calls
-        if (
-            not hasattr(response, "message")
-            or not hasattr(response.message, "tool_calls")
-            or response.message.tool_calls is None
-        ):
+        tool_calls = None
+
+        # Handle different response types
+        if hasattr(response, "message"):
+            msg = getattr(response, "message")
+            if hasattr(msg, "tool_calls"):
+                tool_calls = getattr(msg, "tool_calls")
+        elif isinstance(response, dict) and "message" in response:
+            msg_dict = response["message"]
+            if "tool_calls" in msg_dict:
+                tool_calls = msg_dict["tool_calls"]
+
+        # If we don't have tool calls, return empty results
+        if tool_calls is None:
             return results
 
         # Process each tool call
-        for tool_call in response.message.tool_calls:
+        for tool_call in tool_calls:
             try:
                 # Get function name and arguments
-                function_name = getattr(getattr(tool_call, "function", {}), "name", "")
-                arguments_data = getattr(
-                    getattr(tool_call, "function", {}), "arguments", {}
-                )
-                tool_id = getattr(tool_call, "id", f"tool_{len(results)}")
+                function_name = ""
+                arguments_data = {}
+                tool_id = f"tool_{len(results)}"
+
+                # Handle different tool call formats
+                if isinstance(tool_call, dict):
+                    if "function" in tool_call:
+                        func_info = tool_call["function"]
+                        if isinstance(func_info, dict):
+                            function_name = func_info.get("name", "")
+                            arguments_data = func_info.get("arguments", {})
+                    if "id" in tool_call:
+                        tool_id = tool_call["id"]
+                else:
+                    # If it's an object
+                    if hasattr(tool_call, "function"):
+                        func_obj = getattr(tool_call, "function")
+                        if hasattr(func_obj, "name"):
+                            function_name = getattr(func_obj, "name")
+                        if hasattr(func_obj, "arguments"):
+                            arguments_data = getattr(func_obj, "arguments")
+                    if hasattr(tool_call, "id"):
+                        tool_id = getattr(tool_call, "id")
 
                 # Parse arguments
+                arguments = {}
                 if isinstance(arguments_data, str):
                     try:
                         arguments = json.loads(arguments_data)
@@ -578,7 +676,7 @@ class OllamaAPI:
     @staticmethod
     def add_tool_results_to_messages(
         messages: List[Dict[str, Any]],
-        response: ollama.ChatResponse,
+        response: Any,
         tool_results: Dict[str, Any],
     ) -> List[Dict[str, Any]]:
         """
@@ -594,25 +692,46 @@ class OllamaAPI:
         """
         updated_messages = messages.copy()
 
-        # Add assistant message with tool calls
+        # Get tool calls from response
+        tool_calls = None
+        assistant_content = ""
+
+        # Handle different response types
         if hasattr(response, "message"):
-            tool_calls = getattr(response.message, "tool_calls", [])
-            updated_messages.append(
-                {
-                    "role": "assistant",
-                    "content": getattr(response.message, "content", ""),
-                    "tool_calls": [] if tool_calls is None else tool_calls,
-                }
-            )
+            msg = getattr(response, "message")
+            if hasattr(msg, "tool_calls"):
+                tool_calls = getattr(msg, "tool_calls")
+            if hasattr(msg, "content"):
+                assistant_content = getattr(msg, "content", "")
+        elif isinstance(response, dict) and "message" in response:
+            msg_dict = response["message"]
+            if "tool_calls" in msg_dict:
+                tool_calls = msg_dict["tool_calls"]
+            if "content" in msg_dict:
+                assistant_content = msg_dict.get("content", "")
+
+        # Add assistant message with tool calls
+        updated_messages.append(
+            {
+                "role": "assistant",
+                "content": assistant_content,
+                "tool_calls": [] if tool_calls is None else tool_calls,
+            }
+        )
 
         # Add tool result messages
-        if (
-            hasattr(response, "message")
-            and hasattr(response.message, "tool_calls")
-            and response.message.tool_calls is not None
-        ):
-            for tool_call in response.message.tool_calls:
-                tool_id = getattr(tool_call, "id", "")
+        if tool_calls is not None:
+            for tool_call in tool_calls:
+                tool_id = ""
+
+                # Extract tool ID
+                if isinstance(tool_call, dict) and "id" in tool_call:
+                    tool_id = tool_call["id"]
+                elif hasattr(tool_call, "id"):
+                    tool_id = getattr(tool_call, "id")
+                else:
+                    continue  # Skip if no ID
+
                 if tool_id and tool_id in tool_results:
                     result = tool_results[tool_id]
                     updated_messages.append(
