@@ -1,5 +1,5 @@
 import time
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Union, Iterator
 
 import streamlit as st
 
@@ -25,6 +25,12 @@ class ChatUI:
 
         if "thinking" not in st.session_state:
             st.session_state.thinking = False
+
+        if "streaming" not in st.session_state:
+            st.session_state.streaming = False
+
+        if "stream_container" not in st.session_state:
+            st.session_state.stream_container = None
 
     def _handle_input(self):
         """Handle user input from the chat input box"""
@@ -89,6 +95,31 @@ class ChatUI:
 
             st.markdown(content, unsafe_allow_html=True)
 
+    def render_streaming_message(self, stream_generator: Iterator[str]):
+        """
+        Render a streaming message in the chat
+
+        Args:
+            stream_generator: Iterator that yields text chunks
+        """
+        # Use write_stream to display the streaming content
+        col1, col2 = st.columns([1, 9])
+
+        with col1:
+            st.write(f"### 🤖")
+
+        with col2:
+            st.markdown("<h4>Assistant</h4>", unsafe_allow_html=True)
+
+            # Ensure we're always yielding strings
+            def string_generator():
+                for chunk in stream_generator:
+                    if chunk is not None:
+                        yield str(chunk)
+
+            # Use write_stream to render the streaming content
+            st.write_stream(string_generator)
+
     def render_messages(self, messages: List[Dict[str, Any]]):
         """
         Render all messages in the chat
@@ -127,6 +158,14 @@ class ChatUI:
         """Add a thinking indicator to show the model is processing"""
         st.session_state.thinking = True
 
+    def start_streaming(self):
+        """Mark the UI as currently streaming a response"""
+        st.session_state.streaming = True
+
+    def stop_streaming(self):
+        """Mark the UI as no longer streaming a response"""
+        st.session_state.streaming = False
+
     def remove_thinking_indicator(self):
         """Remove the thinking indicator when the model is done processing"""
         st.session_state.thinking = False
@@ -154,8 +193,23 @@ class ChatUI:
         # Chat messages area with scrolling
         chat_container = st.container()
         with chat_container:
-            self.render_messages(messages_to_render)
-            self.render_thinking()
+            # Check if we're streaming
+            currently_streaming = st.session_state.streaming
+            has_streaming_message = any(
+                msg.get("is_streaming", False) for msg in messages_to_render
+            )
+
+            # First render all non-streaming messages
+            for idx, message in enumerate(messages_to_render):
+                # Skip streaming messages if we're actively streaming
+                if currently_streaming and message.get("is_streaming", False):
+                    continue
+                self.render_message(message, idx)
+
+            # Now handle the thinking indicator
+            if st.session_state.thinking and not currently_streaming:
+                # Only show thinking spinner when not streaming
+                st.spinner("Thinking...")
 
         # Chat input at the bottom
         st.markdown("---")
