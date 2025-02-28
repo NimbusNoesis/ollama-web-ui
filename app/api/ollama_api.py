@@ -143,31 +143,7 @@ class OllamaAPI:
         Returns:
             List of model dictionaries
         """
-        # Check if we have cached results
-        if (
-            "models_cache" in st.session_state
-            and "cache_time" in st.session_state
-            and time.time() - st.session_state.cache_time < 3600  # 1 hour cache
-        ):
-            logger.info("Using cached models data")
-            models_data = st.session_state.models_cache
-
-            # Filter models based on the search query
-            results = []
-            query_lower = query.lower().strip()
-
-            for model in models_data:
-                if (
-                    query_lower in model["name"].lower()
-                    or query_lower in model["tags"].lower()
-                ):
-                    results.append(model)
-
-            return results
-        else:
-            # Fetch fresh data
-            logger.info(f"Fetching models with query: {query}")
-            return OllamaAPI._fetch_models_from_web(query)
+        return OllamaAPI._fetch_models_from_web(query)
 
     @staticmethod
     def _fetch_models_from_web(query: str) -> List[Dict[str, Any]]:
@@ -209,18 +185,74 @@ class OllamaAPI:
                         )
 
                         if tags_response.status_code == 200:
-                            tags = re.findall(f'{name}:[^"\\s]*', tags_response.text)
-                            filtered_tags = [
-                                tag
-                                for tag in tags
-                                if not any(x in tag for x in ["text", "base", "fp"])
-                                and not re.match(r".*q[45]_[01]", tag)
+                            # Pattern to extract tag name, hash, size, and last updated information
+                            tag_pattern = (
+                                r'<div class="flex px-4 py-3">.*?<a class="group" href="/library/'
+                                + re.escape(name)
+                                + r':([^"]+)".*?<div[^>]*>([^<]+)</div>.*?<span class="font-mono">([^<]+)</span>\s*•\s*([^•]+)•\s*([^<]+)'
+                            )
+                            tag_matches = re.findall(
+                                tag_pattern, tags_response.text, re.DOTALL
+                            )
+
+                            # Process all variants
+                            variants = []
+                            for tag_match in tag_matches:
+                                if len(tag_match) >= 5:
+                                    tag_name = tag_match[0].strip()
+                                    display_name = tag_match[1].strip()
+                                    hash_value = tag_match[2].strip()
+                                    size = tag_match[3].strip()
+                                    last_updated = tag_match[4].strip()
+
+                                    variants.append(
+                                        {
+                                            "tag": f"{name}:{tag_name}",
+                                            "display_name": display_name,
+                                            "hash": hash_value,
+                                            "size": size,
+                                            "last_updated": last_updated,
+                                        }
+                                    )
+
+                            # Fallback: If no variants found with detailed regex, use a simpler approach
+                            if not variants:
+                                simple_tag_pattern = (
+                                    r'href="/library/' + re.escape(name) + r':([^"]+)"'
+                                )
+                                simple_tags = re.findall(
+                                    simple_tag_pattern, tags_response.text
+                                )
+
+                                for tag in simple_tags:
+                                    tag_name = tag.strip()
+                                    if tag_name:
+                                        variants.append(
+                                            {
+                                                "tag": f"{name}:{tag_name}",
+                                                "display_name": tag_name,
+                                                "hash": "",
+                                                "size": "",
+                                                "last_updated": "",
+                                            }
+                                        )
+
+                            # Filter out unwanted tags
+                            filtered_variants = [
+                                variant
+                                for variant in variants
+                                if not any(
+                                    x in variant["tag"] for x in ["text", "base", "fp"]
+                                )
+                                and not re.match(r".*q[45]_[01]", variant["tag"])
                             ]
 
                             model_type = (
                                 "vision"
                                 if "vision" in name
-                                else "embedding" if "minilm" in name else "text"
+                                else "embedding"
+                                if "minilm" in name
+                                else "text"
                             )
 
                             # Extract tags for display
@@ -238,10 +270,14 @@ class OllamaAPI:
                                         if display_tags
                                         else "general"
                                     ),
-                                    "variants": filtered_tags,
+                                    "variants": filtered_variants,
                                 }
                             )
-                            logger.info("Successfully processed %s", name)
+                            logger.info(
+                                "Successfully processed %s with %d variants",
+                                name,
+                                len(filtered_variants),
+                            )
                         else:
                             logger.warning("Failed to get tags for %s", name)
                     except Exception as e:

@@ -1,4 +1,8 @@
 import time
+import os
+import json
+import copy
+from datetime import datetime, timedelta
 from typing import Any, Dict, List
 
 import pandas as pd
@@ -28,6 +32,189 @@ class ModelsPage:
         if "download_error" not in st.session_state:
             st.session_state.download_error = None
 
+        if "show_model_variants" not in st.session_state:
+            st.session_state.show_model_variants = None
+
+        # Setup cache directory
+        self.cache_dir = os.path.join(
+            os.path.dirname(os.path.dirname(os.path.dirname(__file__))),
+            "app",
+            "data",
+            "cache",
+        )
+        os.makedirs(self.cache_dir, exist_ok=True)
+
+        # Cache TTL in seconds (1 hour)
+        self.cache_ttl = 3600
+
+    def _get_cache_path(self, cache_key: str) -> str:
+        """
+        Get the full path for a cache file
+
+        Args:
+            cache_key: Cache identifier
+
+        Returns:
+            Path to the cache file
+        """
+        return os.path.join(self.cache_dir, f"{cache_key}.json")
+
+    def _json_serializable(self, obj):
+        """
+        Convert an object to a JSON serializable format and handle circular references
+
+        Args:
+            obj: Object to convert
+
+        Returns:
+            JSON serializable version of the object
+        """
+        if isinstance(obj, datetime):
+            return obj.isoformat()
+
+        # Handle ModelDetails or other custom objects by converting to dict
+        if hasattr(obj, "__dict__"):
+            return self._json_serializable(obj.__dict__)
+
+        # Handle dictionaries (check for circular references)
+        if isinstance(obj, dict):
+            return {k: self._json_serializable(v) for k, v in obj.items()}
+
+        # Handle lists
+        if isinstance(obj, list):
+            return [self._json_serializable(item) for item in obj]
+
+        # For other types, just return as is and let JSON handle them
+        return obj
+
+    def _save_to_cache(self, cache_key: str, data: Any) -> None:
+        """
+        Save data to cache file
+
+        Args:
+            cache_key: Cache identifier
+            data: Data to cache
+        """
+        cache_path = self._get_cache_path(cache_key)
+
+        # Make a deep copy of the data to avoid modifying the original
+        # and handle possible circular references
+        try:
+            # Create a safe-to-serialize version of the data
+            cache_data = {
+                "timestamp": datetime.now().isoformat(),
+                "data": self._json_serializable(data),
+            }
+
+            with open(cache_path, "w", encoding="utf-8") as f:
+                json.dump(cache_data, f, indent=2)
+        except Exception as e:
+            # If serialization fails, log the error but continue execution
+            print(f"Error caching data: {str(e)}")
+
+    def _load_from_cache(self, cache_key: str) -> Any:
+        """
+        Load data from cache if it exists and is not expired
+
+        Args:
+            cache_key: Cache identifier
+
+        Returns:
+            Cached data or None if cache miss
+        """
+        cache_path = self._get_cache_path(cache_key)
+
+        if not os.path.exists(cache_path):
+            return None
+
+        try:
+            with open(cache_path, "r", encoding="utf-8") as f:
+                cache_data = json.load(f)
+
+            # Check if cache is expired (older than TTL)
+            timestamp = datetime.fromisoformat(cache_data["timestamp"])
+            if datetime.now() - timestamp > timedelta(seconds=self.cache_ttl):
+                # Cache expired
+                return None
+
+            return cache_data["data"]
+        except (json.JSONDecodeError, KeyError, ValueError):
+            # Invalid cache file
+            return None
+
+    def _get_local_models(self, use_cache=True):
+        """
+        Get local models with optional caching
+
+        Args:
+            use_cache: Whether to use cached results
+
+        Returns:
+            List of local models
+        """
+        # Cache miss, get fresh data
+        models = OllamaAPI.get_local_models()
+
+        return models
+
+    def _get_model_info(self, model_name: str, use_cache=True):
+        """
+        Get model info with optional caching
+
+        Args:
+            model_name: Name of the model
+            use_cache: Whether to use cached results
+
+        Returns:
+            Model information
+        """
+        cache_key = f"model_info_{model_name}"
+
+        if use_cache:
+            cached_data = self._load_from_cache(cache_key)
+            if cached_data is not None:
+                return cached_data
+
+        # Cache miss, get fresh data
+        model_info = OllamaAPI.get_model_info(model_name)
+
+        # Try to cache, but continue even if caching fails
+        try:
+            self._save_to_cache(cache_key, model_info)
+        except Exception as e:
+            print(f"Warning: Failed to cache model info: {str(e)}")
+
+        return model_info
+
+    def _search_models(self, search_query: str, use_cache=True):
+        """
+        Search models with optional caching
+
+        Args:
+            search_query: Search term
+            use_cache: Whether to use cached results
+
+        Returns:
+            Search results
+        """
+        cache_key = f"search_results_{search_query}"
+
+        if use_cache:
+            cached_data = self._load_from_cache(cache_key)
+            if cached_data is not None:
+                return cached_data
+
+        # Cache miss, get fresh data
+        results = OllamaAPI.search_models(search_query)
+
+        # Try to cache, but continue even if caching fails
+        try:
+            self._save_to_cache(cache_key, results)
+        except Exception as e:
+            print(f"Warning: Failed to cache search results: {str(e)}")
+
+        return results
+
     def render_model_list(self, models: List[Dict[str, Any]]):
         """
         Render the models list section
@@ -43,7 +230,23 @@ class ModelsPage:
             # Create a dataframe for better display
             model_data = []
             for model in models:
-                size_gb = round(model.get("size", 0) / (1024**3), 2)
+                # Safely extract size value, handling if it's a dict or other type
+                size_value = model.get("size", 0)
+                if isinstance(size_value, dict):
+                    # Handle nested dictionary - try to extract a numeric value or default to 0
+                    size_value = (
+                        size_value.get("size", 0) if isinstance(size_value, dict) else 0
+                    )
+
+                # Ensure size_value is a number before division
+                try:
+                    size_gb = (
+                        round(float(size_value) / (1024**3), 2) if size_value else 0
+                    )
+                except (TypeError, ValueError):
+                    # If conversion to float fails, default to 0
+                    size_gb = 0
+
                 model_data.append(
                     {
                         "Name": model.get("model", "Unknown"),
@@ -100,7 +303,8 @@ class ModelsPage:
         st.subheader(f"Details for {model_name}")
 
         with st.spinner("Loading model details..."):
-            model_info = OllamaAPI.get_model_info(model_name)
+            # Use cached model info if available
+            model_info = self._get_model_info(model_name)
 
             if model_info:
                 try:
@@ -170,6 +374,64 @@ class ModelsPage:
                 st.session_state.show_model_details = None
                 st.rerun()
 
+    def render_model_variants(self, model_data: Dict[str, Any]):
+        """
+        Render the model variants selection page
+
+        Args:
+            model_data: Model data including variants
+        """
+        st.subheader(f"Available Variants for {model_data['name']}")
+
+        # Back button at the top
+        if st.button("← Back to Search Results", key="back_to_search"):
+            st.session_state.show_model_variants = None
+            st.rerun()
+
+        st.write(f"**Model:** {model_data['name']}")
+        st.write(f"**Tags:** {model_data['tags']}")
+
+        if 'variants' in model_data and model_data['variants']:
+            st.write("### Select a Variant to Download")
+
+            # Create a table for better variant comparison
+            variant_data = []
+            for variant in model_data['variants']:
+                variant_data.append({
+                    "Variant": variant.get('display_name', variant.get('tag', 'Unknown')),
+                    "Tag": variant.get('tag', 'Unknown'),
+                    "Size": variant.get('size', 'Unknown'),
+                    "Last Updated": variant.get('last_updated', 'Unknown'),
+                    "Hash": variant.get('hash', 'Unknown')
+                })
+
+            # Display as a table
+            df = pd.DataFrame(variant_data)
+            st.dataframe(df, use_container_width=True)
+
+            # Dropdown to select variant
+            variant_options = [v.get('tag') for v in model_data['variants']]
+            selected_variant = st.selectbox(
+                "Select variant to download",
+                variant_options,
+                format_func=lambda x: f"{x} ({next((v['size'] for v in model_data['variants'] if v['tag'] == x), 'Unknown')})"
+            )
+
+            if st.button("Download Selected Variant", key="download_variant"):
+                if selected_variant and selected_variant.strip():
+                    self.pull_model(selected_variant.strip())
+                else:
+                    st.error("Please select a valid variant")
+        else:
+            st.warning("No variants information available for this model.")
+
+            # Fallback option to download the base model
+            if st.button("Download Base Model"):
+                if model_data['name'] and model_data['name'].strip():
+                    self.pull_model(model_data['name'].strip())
+                else:
+                    st.error("Invalid model name")
+
     def download_model(self):
         """Handle downloading a model with progress display"""
         if not st.session_state.show_download_status:
@@ -207,6 +469,14 @@ class ModelsPage:
                     )
                     st.session_state.download_complete = True
 
+                    # Invalidate local models cache after successful download
+                    cache_path = self._get_cache_path("local_models")
+                    if os.path.exists(cache_path):
+                        try:
+                            os.remove(cache_path)
+                        except:
+                            pass
+
                     if st.button("Close"):
                         st.session_state.show_download_status = False
                         st.rerun()
@@ -226,10 +496,15 @@ class ModelsPage:
             "Search term", placeholder="e.g., code, vision, small"
         )
 
+        # Add checkbox for using cache
+        use_cache = st.sidebar.checkbox(
+            "Use cached results", value=True, key="sidebar_use_cache"
+        )
+
         if st.sidebar.button("Search Models", disabled=not search_query):
             placeholder = st.sidebar.empty()
             placeholder.info("Searching models...")
-            results = OllamaAPI.search_models(search_query)
+            results = self._search_models(search_query, use_cache=use_cache)
             st.session_state.search_results = results
             placeholder.empty()
             if not results:
@@ -245,11 +520,9 @@ class ModelsPage:
                         st.write(f"**{model['name']}**")
                         st.caption(f"Tags: {model['tags']}")
                     with col2:
-                        if st.button("Pull", key=f"pull_search_{i}"):
-                            if model["name"] and model["name"].strip():
-                                self.pull_model(model["name"].strip())
-                            else:
-                                st.error("Invalid model name")
+                        if st.button("Details", key=f"details_sidebar_{i}"):
+                            st.session_state.show_model_variants = model
+                            st.rerun()
 
     def pull_model(self, model_name: str):
         """
@@ -290,11 +563,14 @@ class ModelsPage:
             key="search_tab_query",
         )
 
+        # Add checkbox for using cache
+        use_cache = st.checkbox("Use cached results", value=True, key="tab_use_cache")
+
         col1, col2 = st.columns([1, 4])
         with col1:
             if st.button("Search", disabled=not search_tab_query):
                 with st.spinner("Searching models..."):
-                    results = OllamaAPI.search_models(search_tab_query)
+                    results = self._search_models(search_tab_query, use_cache=use_cache)
                     st.session_state.search_results_tab = results
 
         with col2:
@@ -305,7 +581,9 @@ class ModelsPage:
         if "search_results_tab" not in st.session_state:
             with st.spinner("Loading available models..."):
                 # Get all models by using an empty search
-                st.session_state.search_results_tab = OllamaAPI.search_models("")
+                st.session_state.search_results_tab = self._search_models(
+                    "", use_cache=use_cache
+                )
 
         results = st.session_state.search_results_tab
 
@@ -325,18 +603,22 @@ class ModelsPage:
                         st.write(f"**{model['name']}**")
                         st.caption(f"Tags: {model['tags']}")
 
+                        # For variant count display
+                        variant_count = len(model.get('variants', []))
+                        variant_text = f"{variant_count} variant{'s' if variant_count != 1 else ''}"
+
                         # Check if model is already installed
-                        models = OllamaAPI.get_local_models()
+                        models = self._get_local_models(use_cache=use_cache)
                         installed = any(m.get("model") == model["name"] for m in models)
 
                         if installed:
                             st.success("✓ Installed")
                         else:
-                            if st.button("Pull Model", key=f"pull_tab_{i}"):
-                                if model["name"] and model["name"].strip():
-                                    self.pull_model(model["name"].strip())
-                                else:
-                                    st.error("Invalid model name")
+                            st.caption(f"Available: {variant_text}")
+                            if st.button("View Details", key=f"view_details_{i}"):
+                                st.session_state.show_model_variants = model
+                                st.rerun()
+
         else:
             st.info("No models found matching your criteria")
 
@@ -345,12 +627,36 @@ class ModelsPage:
         # Handle download overlay if active
         if st.session_state.show_download_status:
             self.download_model()
+            return  # Don't render the rest of the page when downloading
+
+        # Show model variants page if selected
+        if st.session_state.show_model_variants:
+            self.render_model_variants(st.session_state.show_model_variants)
+            return  # Don't render the rest of the page when showing variants
 
         st.title("Ollama Model Manager")
         st.write("Manage your Ollama models from this dashboard")
 
-        # Get installed models
-        models = OllamaAPI.get_local_models()
+        # Add option to clear cache
+        with st.expander("Cache Settings"):
+            st.write(f"Cache directory: `{self.cache_dir}`")
+            st.write(f"Cache TTL: {self.cache_ttl} seconds (1 hour)")
+            if st.button("Clear All Cache"):
+                try:
+                    # Delete all cache files
+                    for file in os.listdir(self.cache_dir):
+                        if file.endswith(".json"):
+                            os.remove(os.path.join(self.cache_dir, file))
+                    st.success("Cache cleared successfully")
+                except Exception as e:
+                    st.error(f"Error clearing cache: {str(e)}")
+
+        # Get installed models (using cache by default)
+        try:
+            models = self._get_local_models()
+        except Exception as e:
+            st.error(f"Error loading models: {str(e)}")
+            models = []
 
         # Render search box in sidebar
         self.render_search_box()

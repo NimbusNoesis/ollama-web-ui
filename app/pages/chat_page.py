@@ -1,12 +1,13 @@
-import streamlit as st
-import time
 import json
-from typing import Dict, List, Any, Optional, cast, Union, Iterator, TYPE_CHECKING
+from typing import Any
+
+import streamlit as st
+
 from app.api.ollama_api import OllamaAPI
 from app.components.chat_ui import ChatUI
 from app.utils.chat_manager import ChatManager
+from app.utils.logger import get_logger
 from app.utils.tool_loader import ToolLoader
-from app.utils.logger import get_logger, exception_handler, ErrorHandler
 
 # Get application logger
 logger = get_logger()
