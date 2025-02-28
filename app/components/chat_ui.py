@@ -1,6 +1,6 @@
 import time
 import re
-from typing import Any, Callable, Dict, List, Optional, Union, Iterator
+from typing import Any, Callable, Dict, List, Optional, Iterator
 
 import streamlit as st
 
@@ -146,7 +146,7 @@ class ChatUI:
         col1, col2 = st.columns([1, 9])
 
         with col1:
-            st.write(f"### 🤖")
+            st.write("### 🤖")
 
         with col2:
             st.markdown("<h4>Assistant</h4>", unsafe_allow_html=True)
@@ -157,10 +157,6 @@ class ChatUI:
             # This generator wraps the stream and detects/processes <think> tags
             def process_stream():
                 nonlocal complete_message
-
-                # Flag to track if we're inside a <think> block
-                in_thinking_block = False
-                current_thinking_content = ""
 
                 for chunk in stream_generator:
                     if chunk is not None:
@@ -253,9 +249,6 @@ class ChatUI:
         with chat_container:
             # Check if we're streaming
             currently_streaming = st.session_state.streaming
-            has_streaming_message = any(
-                msg.get("is_streaming", False) for msg in messages_to_render
-            )
 
             # First render all non-streaming messages
             for idx, message in enumerate(messages_to_render):

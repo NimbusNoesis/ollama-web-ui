@@ -405,7 +405,6 @@ class ChatPage:
                     function_name = result.get("function_name", "unknown_function")
 
                     # Display tool call
-                    arg_str = "arguments not available"
                     if "output" in result:
                         # Format output for display
                         if isinstance(result["output"], (dict, list)):
@@ -492,19 +491,15 @@ class ChatPage:
             for tool_call in tool_calls_list:
                 # Extract function info safely for both dict and object formats
                 function_name = "unknown_function"
-                arguments = "{}"
 
                 if isinstance(tool_call, dict) and "function" in tool_call:
                     function_info = tool_call["function"]
                     if isinstance(function_info, dict):
                         function_name = function_info.get("name", "unknown_function")
-                        arguments = function_info.get("arguments", "{}")
                 elif hasattr(tool_call, "function"):
                     function_obj = getattr(tool_call, "function")
                     if hasattr(function_obj, "name"):
                         function_name = getattr(function_obj, "name")
-                    if hasattr(function_obj, "arguments"):
-                        arguments = getattr(function_obj, "arguments")
 
                 # Display simulation message
                 self.chat_manager.add_message(
