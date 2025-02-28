@@ -12,11 +12,11 @@ class ModelComparison:
         if "model_outputs" not in st.session_state:
             st.session_state.model_outputs = {}
 
-        if "selected_models" not in st.session_state:
-            st.session_state.selected_models = []
-
         if "comparison_prompt" not in st.session_state:
             st.session_state.comparison_prompt = ""
+
+        if "selected_comparison_models" not in st.session_state:
+            st.session_state.selected_comparison_models = []
 
     def select_models(self, available_models: List[Dict[str, Any]]) -> List[str]:
         """
@@ -28,25 +28,29 @@ class ModelComparison:
         Returns:
             List of selected model names
         """
-        # Convert models to options for multiselect
-        model_options = [
-            model.get("model", model.get("name", "")) for model in available_models
-        ]
+        # Convert models to options for multiselect, handling different data structures
+        model_options = []
+        for model in available_models:
+            if isinstance(model, dict):
+                model_name = model.get("model") or model.get("name", "")
+            elif isinstance(model, str):
+                model_name = model
+            else:
+                model_name = str(model)
+            if model_name:
+                model_options.append(model_name)
 
-        # Let the user select models
+        # Create multiselect with previous selection as default
         selected_models = st.multiselect(
             "Select models to compare",
             options=model_options,
-            default=(
-                st.session_state.selected_models
-                if st.session_state.selected_models
-                else None
-            ),
+            default=st.session_state.selected_comparison_models,
+            key="model_comparison_select",
+            help="Select multiple models to compare their responses",
         )
 
-        # Update session state
-        st.session_state.selected_models = selected_models
-
+        # Store the current selection
+        st.session_state.selected_comparison_models = selected_models
         return selected_models
 
     def input_prompt(self) -> str:
@@ -89,7 +93,7 @@ class ModelComparison:
             # Just one model, use full width
             for model_name, output in outputs.items():
                 st.subheader(model_name)
-                st.markdown(output)
+                st.markdown(output, unsafe_allow_html=True)
         else:
             # Multiple models, create columns
             cols = st.columns(min(num_outputs, 3))  # Max 3 columns
@@ -99,7 +103,7 @@ class ModelComparison:
                 col_idx = idx % len(cols)  # Wrap around if more than 3 outputs
                 with cols[col_idx]:
                     st.subheader(model_name)
-                    st.markdown(output)
+                    st.markdown(output, unsafe_allow_html=True)
 
                 # Start a new row after every 3 models
                 if col_idx == len(cols) - 1 and idx < num_outputs - 1:
@@ -118,6 +122,33 @@ class ModelComparison:
             available_models: List of available models
             on_compare: Callback function when the compare button is clicked
         """
+        # Add CSS for thinking sections
+        st.markdown(
+            """
+        <style>
+        .thinking-content {
+            background-color: rgba(247, 247, 247, 0.1);
+            border-radius: 4px;
+            padding: 10px;
+            margin: 10px 0;
+        }
+        details > summary {
+            cursor: pointer;
+            padding: 4px;
+            color: rgba(49, 51, 63, 0.8);
+        }
+        details > summary:hover {
+            background-color: rgba(247, 247, 247, 0.2);
+            border-radius: 4px;
+        }
+        details[open] > summary {
+            margin-bottom: 10px;
+        }
+        </style>
+        """,
+            unsafe_allow_html=True,
+        )
+
         st.header("Model Comparison")
 
         # Model selection

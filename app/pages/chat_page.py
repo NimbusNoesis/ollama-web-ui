@@ -1,12 +1,13 @@
-import streamlit as st
-import time
 import json
-from typing import Dict, List, Any, Optional, cast, Union, Iterator, TYPE_CHECKING
+from typing import Any
+
+import streamlit as st
+
 from app.api.ollama_api import OllamaAPI
 from app.components.chat_ui import ChatUI
 from app.utils.chat_manager import ChatManager
+from app.utils.logger import get_logger
 from app.utils.tool_loader import ToolLoader
-from app.utils.logger import get_logger, exception_handler, ErrorHandler
 
 # Get application logger
 logger = get_logger()
@@ -59,7 +60,9 @@ class ChatPage:
             st.session_state.full_response = ""
 
         # Initialize the chat UI
-        self.chat_ui = ChatUI(on_message=self.process_message)
+        self.chat_ui = ChatUI(
+            on_message=self.process_message, chat_manager=self.chat_manager
+        )
 
         # Load installed tools
         self.load_installed_tools()
@@ -402,7 +405,6 @@ class ChatPage:
                     function_name = result.get("function_name", "unknown_function")
 
                     # Display tool call
-                    arg_str = "arguments not available"
                     if "output" in result:
                         # Format output for display
                         if isinstance(result["output"], (dict, list)):
@@ -489,19 +491,15 @@ class ChatPage:
             for tool_call in tool_calls_list:
                 # Extract function info safely for both dict and object formats
                 function_name = "unknown_function"
-                arguments = "{}"
 
                 if isinstance(tool_call, dict) and "function" in tool_call:
                     function_info = tool_call["function"]
                     if isinstance(function_info, dict):
                         function_name = function_info.get("name", "unknown_function")
-                        arguments = function_info.get("arguments", "{}")
                 elif hasattr(tool_call, "function"):
                     function_obj = getattr(tool_call, "function")
                     if hasattr(function_obj, "name"):
                         function_name = getattr(function_obj, "name")
-                    if hasattr(function_obj, "arguments"):
-                        arguments = getattr(function_obj, "arguments")
 
                 # Display simulation message
                 self.chat_manager.add_message(
@@ -614,19 +612,6 @@ class ChatPage:
         # Tools settings
         st.sidebar.subheader("Tools")
 
-        # Custom tools
-        use_tools = st.sidebar.checkbox(
-            "Enable Custom Tools",
-            value=st.session_state.use_tools,
-            help="Enable tools created in the Tools page",
-            key="enable_custom_tools",
-        )
-        if use_tools != st.session_state.use_tools:
-            st.session_state.use_tools = use_tools
-            # Disable installed tools if custom tools are enabled
-            if use_tools:
-                st.session_state.use_installed_tools = False
-
         # Installed tools
         use_installed_tools = st.sidebar.checkbox(
             "Enable Installed Tools",
@@ -662,10 +647,6 @@ class ChatPage:
                 )
                 if tool_choice != st.session_state.tool_choice:
                     st.session_state.tool_choice = tool_choice
-            else:
-                st.sidebar.warning(
-                    "No tools created yet. Go to the Tools page to create tools."
-                )
         elif st.session_state.use_installed_tools:
             # Load installed tools if needed
             if not st.session_state.installed_tools:
@@ -718,8 +699,45 @@ class ChatPage:
                     "No tools installed. Go to the Tools page to install tools."
                 )
 
+        # Chat history section
+        st.sidebar.subheader("Chat History")
+        saved_chats = self.chat_manager.list_saved_chats()
+
+        if saved_chats:
+            # Display saved chats in a dropdown
+            chat_options = ["Current Chat"] + [
+                f"{chat['title']} ({chat['created_at'].split('T')[0]})"
+                for chat in saved_chats
+            ]
+
+            selected_chat = st.sidebar.selectbox(
+                "Load Chat", chat_options, key="chat_history_selector"
+            )
+
+            # Handle chat selection
+            if selected_chat != "Current Chat":
+                # Extract the chat_id from the selected option
+                selected_idx = (
+                    chat_options.index(selected_chat) - 1
+                )  # -1 because of "Current Chat"
+                selected_chat_id = saved_chats[selected_idx]["id"]
+
+                # Button to load the selected chat
+                if st.sidebar.button("Load Selected Chat", key="load_chat_btn"):
+                    self.chat_manager.load_chat(selected_chat_id)
+                    st.rerun()
+        else:
+            st.sidebar.info("No saved chats yet.")
+
         # Chat actions
         st.sidebar.subheader("Actions")
+
+        # Create new chat button
+        if st.sidebar.button("New Chat", key="new_chat_btn"):
+            self.chat_manager.create_new_chat()
+            st.rerun()
+
+        # Clear chat button
         if st.sidebar.button("Clear Chat", key="sidebar_clear_chat"):
             self.chat_manager.reset()
             st.rerun()

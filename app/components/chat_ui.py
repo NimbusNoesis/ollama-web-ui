@@ -1,5 +1,6 @@
 import time
-from typing import Any, Callable, Dict, List, Optional, Union, Iterator
+import re
+from typing import Any, Callable, Dict, List, Optional, Iterator
 
 import streamlit as st
 
@@ -7,14 +8,16 @@ import streamlit as st
 class ChatUI:
     """Component for displaying and interacting with the chat interface"""
 
-    def __init__(self, on_message: Callable[[str], None]):
+    def __init__(self, on_message: Callable[[str], None], chat_manager=None):
         """
         Initialize the chat UI
 
         Args:
             on_message: Callback function to handle new user messages
+            chat_manager: Optional chat manager instance for managing chat state
         """
         self.on_message = on_message
+        self.chat_manager = chat_manager
 
         # Initialize session state for messages if needed
         if "messages" not in st.session_state:
@@ -48,6 +51,39 @@ class ChatUI:
             if "clear_input_flag" not in st.session_state:
                 st.session_state.clear_input_flag = True
 
+    def _process_thinking_tags(self, content: str) -> str:
+        """
+        Process <think> tags in content and convert them to expandable sections
+
+        Args:
+            content: The message content to process
+
+        Returns:
+            Processed content with <think> tags converted to expandable sections
+        """
+        if "<think>" not in content:
+            return content
+
+        # Use regex to find all <think> sections
+        pattern = r"<think>(.*?)</think>"
+
+        def replacement(match):
+            thinking_content = match.group(1).strip()
+            # Create an expandable details/summary HTML element with a horizontal line after it
+            return f"""
+            <details>
+                <summary><strong>Thinking</strong> (click to expand)</summary>
+                <div class="thinking-content">
+                    {thinking_content}
+                </div>
+            </details>
+            <hr style="border-top: 1px solid #ccc; margin-top: 10px; margin-bottom: 10px;"/>
+            """
+
+        # Replace all <think> tags with expandable sections
+        processed_content = re.sub(pattern, replacement, content, flags=re.DOTALL)
+        return processed_content
+
     def render_message(self, message: Dict[str, Any], idx: int):
         """
         Render a single message in the chat
@@ -58,6 +94,10 @@ class ChatUI:
         """
         role = message.get("role", "")
         content = message.get("content", "")
+
+        # Process thinking tags for assistant messages
+        if role == "assistant" and content:
+            content = self._process_thinking_tags(content)
 
         # Determine avatar and alignment
         if role == "user":
@@ -106,19 +146,33 @@ class ChatUI:
         col1, col2 = st.columns([1, 9])
 
         with col1:
-            st.write(f"### 🤖")
+            st.write("### 🤖")
 
         with col2:
             st.markdown("<h4>Assistant</h4>", unsafe_allow_html=True)
 
-            # Ensure we're always yielding strings
-            def string_generator():
+            # Buffer to accumulate chunks and detect <think> tags
+            complete_message = ""
+
+            # This generator wraps the stream and detects/processes <think> tags
+            def process_stream():
+                nonlocal complete_message
+
                 for chunk in stream_generator:
                     if chunk is not None:
-                        yield str(chunk)
+                        chunk_str = str(chunk)
+                        complete_message += chunk_str
+
+                        # For now, simply yield the chunk for display
+                        # We'll process <think> tags after streaming is complete
+                        yield chunk_str
+
+                # After streaming is complete, if there are <think> tags,
+                # they will be processed when the full message is displayed
+                # in render_message after streaming completes
 
             # Use write_stream to render the streaming content
-            st.write_stream(string_generator)
+            st.write_stream(process_stream())
 
     def render_messages(self, messages: List[Dict[str, Any]]):
         """
@@ -195,9 +249,6 @@ class ChatUI:
         with chat_container:
             # Check if we're streaming
             currently_streaming = st.session_state.streaming
-            has_streaming_message = any(
-                msg.get("is_streaming", False) for msg in messages_to_render
-            )
 
             # First render all non-streaming messages
             for idx, message in enumerate(messages_to_render):
@@ -221,7 +272,12 @@ class ChatUI:
             if st.button(
                 "Clear Chat", disabled=st.session_state.thinking, key="btn_clear_chat"
             ):
-                st.session_state.messages = []
+                # Use chat_manager if available, otherwise reset the messages directly
+                if self.chat_manager:
+                    self.chat_manager.reset()
+                    st.rerun()
+                else:
+                    st.session_state.messages = []
 
         with col3:
             # Modified to use a callback for clearing input
