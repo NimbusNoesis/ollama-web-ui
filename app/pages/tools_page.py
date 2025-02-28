@@ -1,8 +1,18 @@
-import streamlit as st
 import json
 import uuid
-from typing import Dict, List, Any, Optional
-from app.api.ollama_api import OllamaAPI
+import tempfile
+import os
+import subprocess
+from typing import Any, Dict, List
+
+import streamlit as st
+from pygments import highlight
+from pygments.lexers.python import PythonLexer
+from pygments.formatters.html import HtmlFormatter
+
+# Import streamlit_code_editor
+from code_editor import code_editor
+
 from app.utils.logger import get_logger
 from app.utils.tool_loader import ToolLoader
 
@@ -21,6 +31,14 @@ class ToolsPage:
 
         if "selected_tool" not in st.session_state:
             st.session_state.selected_tool = None
+
+        # Add session state for edited code
+        if "edited_code" not in st.session_state:
+            st.session_state.edited_code = {}
+
+        # Add session state for lint results
+        if "lint_results" not in st.session_state:
+            st.session_state.lint_results = {}
 
         if "tool_templates" not in st.session_state:
             # Initialize with some common tool templates
@@ -675,18 +693,106 @@ class ToolsPage:
 
         return code
 
+    def run_pylint(self, code: str) -> List[Dict[str, Any]]:
+        """
+        Run pylint on the provided code and return the results
+
+        Args:
+            code: Python code to lint
+
+        Returns:
+            List of lint issues found
+        """
+        if not code:
+            return []
+
+        try:
+            # Create a temporary file to store the code
+            with tempfile.NamedTemporaryFile(
+                suffix=".py", delete=False, mode="w", encoding="utf-8"
+            ) as temp_file:
+                temp_file.write(code)
+                temp_path = temp_file.name
+
+            # Run pylint on the temporary file
+            try:
+                result = subprocess.run(
+                    ["pylint", "--output-format=json", temp_path],
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                )
+
+                # Parse the JSON output if available
+                if result.stdout:
+                    try:
+                        return json.loads(result.stdout)
+                    except json.JSONDecodeError:
+                        logger.error(f"Failed to parse pylint output: {result.stdout}")
+                        return []
+                return []
+            finally:
+                # Clean up the temporary file
+                try:
+                    os.unlink(temp_path)
+                except Exception as e:
+                    logger.error(f"Failed to remove temporary file: {e}")
+        except Exception as e:
+            logger.error(f"Error running pylint: {e}")
+            return []
+
+    def highlight_python_code(self, code: str) -> str:
+        """
+        Highlight Python code using pygments
+
+        Args:
+            code: Python code to highlight
+
+        Returns:
+            HTML with highlighted code
+        """
+        if not code:
+            return ""
+
+        formatter = HtmlFormatter(style="colorful")
+        highlighted_code = highlight(code, PythonLexer(), formatter)
+
+        # Add the CSS for syntax highlighting
+        css = formatter.get_style_defs()
+        highlighted_html = f"""
+        <style>{css}</style>
+        {highlighted_code}
+        """
+
+        return highlighted_html
+
     def render_code_generator(self):
         """Render the code generator section"""
         st.subheader("Tool Implementation Generator")
 
-        if not st.session_state.tools:
+        # Check both session state tools and installed tools
+        installed_tools = ToolLoader.list_available_tools()
+
+        # If there are no tools in session state and no installed tools, show info message
+        if not st.session_state.tools and not installed_tools:
             st.info("Create some tools before generating implementation code")
             return
 
         # Tool selection
-        tool_options = ["Select a tool..."] + [
-            tool["definition"]["function"]["name"] for tool in st.session_state.tools
-        ]
+        tool_options = ["Select a tool..."]
+
+        # Add tools from session state
+        if st.session_state.tools:
+            for tool in st.session_state.tools:
+                tool_options.append(tool["definition"]["function"]["name"])
+
+        # Add installed tools that are not in the current session
+        for tool_name in installed_tools:
+            if tool_name not in [
+                tool["definition"]["function"]["name"]
+                for tool in st.session_state.tools
+            ]:
+                tool_options.append(f"{tool_name} (installed)")
 
         selected_tool_name = st.selectbox(
             "Choose a tool to generate implementation for", tool_options
@@ -696,59 +802,150 @@ class ToolsPage:
             st.info("Please select a tool to generate implementation code")
             return
 
-        # Find the selected tool data
+        # Check if this is an installed tool
+        is_installed_tool = False
+        if " (installed)" in selected_tool_name:
+            actual_tool_name = selected_tool_name.replace(" (installed)", "")
+            is_installed_tool = True
+        else:
+            actual_tool_name = selected_tool_name
+
+        # Find or load the selected tool data
         selected_tool_data = None
-        for tool in st.session_state.tools:
-            if tool["definition"]["function"]["name"] == selected_tool_name:
-                selected_tool_data = tool["definition"]
-                break
+
+        if is_installed_tool:
+            # Load the tool definition from the installed tool
+            _, selected_tool_data = ToolLoader.load_tool_function(actual_tool_name)
+
+            # Load the implementation if we haven't already
+            if actual_tool_name not in st.session_state.edited_code:
+                tool_code = ToolLoader.get_tool_implementation(actual_tool_name)
+                if tool_code:
+                    st.session_state.edited_code[actual_tool_name] = tool_code
+                    selected_tool_name = actual_tool_name
+        else:
+            # Find the tool in the session state
+            for tool in st.session_state.tools:
+                if tool["definition"]["function"]["name"] == actual_tool_name:
+                    selected_tool_data = tool["definition"]
+                    break
 
         if selected_tool_data:
-            # Generate the implementation code
-            implementation_code = self.generate_tool_implementation(selected_tool_data)
+            # Generate the implementation code if not already in session state
+            if actual_tool_name not in st.session_state.edited_code:
+                st.session_state.edited_code[actual_tool_name] = (
+                    self.generate_tool_implementation(selected_tool_data)
+                )
 
-            # Display the code
-            st.code(implementation_code, language="python")
+            col1, col2 = st.columns([1, 3])
 
-            # Add download button
-            st.download_button(
-                label="Download Implementation",
-                data=implementation_code,
-                file_name=f"{selected_tool_name}_implementation.py",
-                mime="text/plain",
-            )
+            with col1:
+                # Add a "Regenerate Code" button to start fresh
+                if st.button("Regenerate Code"):
+                    st.session_state.edited_code[actual_tool_name] = (
+                        self.generate_tool_implementation(selected_tool_data)
+                    )
+                    # Clear any lint results
+                    st.session_state.lint_results[actual_tool_name] = []
+                    st.rerun()
 
-            # Add button to save to tools directory
+            with col2:
+                # Display lint results if any
+                lint_results = st.session_state.lint_results.get(actual_tool_name, [])
+                if lint_results:
+                    with st.expander("Lint Results", expanded=True):
+                        for issue in lint_results:
+                            message_type = issue.get("type", "unknown")
+                            line = issue.get("line", 0)
+                            message = issue.get("message", "")
+
+                            if message_type == "convention":
+                                st.info(f"Line {line}: {message}")
+                            elif message_type in ["error", "fatal"]:
+                                st.error(f"Line {line}: {message}")
+                            elif message_type == "warning":
+                                st.warning(f"Line {line}: {message}")
+                            else:
+                                st.write(f"Line {line}: {message}")
+
+            # Create tabs for editor and highlighted view
+            editor_tabs = st.tabs(["Code Editor"])
+
+            with editor_tabs[0]:  # Access the first tab in the list
+                # Live code editor
+                st.subheader("Edit Implementation")
+
+                # Use a form for the code editor to prevent reloading on every keystroke
+                with st.form(key=f"code_form_{actual_tool_name}"):
+                    edited_code = code_editor(
+                        st.session_state.edited_code.get(actual_tool_name, "")
+                    )
+
+                    update_button = st.form_submit_button("Update Code")
+
+                    if update_button:
+                        st.session_state.edited_code[actual_tool_name] = edited_code
+                        st.success("Code updated successfully!")
+
+            # Syntax validation indicator
+            try:
+                # Try to compile the code to check for syntax errors
+                code_to_check = st.session_state.edited_code.get(actual_tool_name, "")
+                if code_to_check:
+                    compile(code_to_check, "<string>", "exec")
+                    st.success("✓ Code syntax valid")
+                else:
+                    st.error("Edited code cannot be None")
+            except SyntaxError as e:
+                st.error(f"Syntax error: {str(e)}")
+
+            # Add download button for the edited version
             col1, col2 = st.columns(2)
 
             with col1:
-                if st.button(
-                    "Install Tool to App", key=f"install_{selected_tool_name}"
-                ):
-                    # Save the implementation to the tools directory
-                    py_path = ToolLoader.save_tool_implementation(
-                        selected_tool_name, implementation_code
-                    )
+                st.download_button(
+                    label="Download Implementation",
+                    data=st.session_state.edited_code.get(actual_tool_name, ""),
+                    file_name=f"{actual_tool_name}_implementation.py",
+                    mime="text/plain",
+                )
 
-                    # Save the definition to the tools directory
-                    json_path = ToolLoader.save_tool_definition(
-                        selected_tool_name, selected_tool_data
-                    )
+            with col2:
+                if st.button("Save Tool", key=f"install_{actual_tool_name}"):
+                    # Try to validate the code first
+                    try:
+                        code_to_save = st.session_state.edited_code.get(
+                            actual_tool_name, ""
+                        )
+                        if code_to_save:
+                            compile(code_to_save, "<string>", "exec")
 
-                    st.success(f"Installed tool to {py_path} and {json_path}")
+                        # Save the implementation to the tools directory
+                        py_path = ToolLoader.save_tool_implementation(
+                            actual_tool_name, code_to_save
+                        )
+
+                        # Save the definition to the tools directory
+                        json_path = ToolLoader.save_tool_definition(
+                            actual_tool_name, selected_tool_data
+                        )
+
+                        st.success(f"Installed tool to {py_path} and {json_path}")
+                    except SyntaxError as e:
+                        st.error(f"Cannot install due to syntax error: {str(e)}")
 
             # Show integration example
             with st.expander("How to Use This Implementation"):
                 st.markdown(
                     f"""
-                ### Using the {selected_tool_name} Tool
+                ### Using the {actual_tool_name} Tool
 
-                1. Save the implementation to a Python file (e.g., `{selected_tool_name}.py`)
+                1. Save the implementation to a Python file (e.g., `{actual_tool_name}.py`)
                 2. Import the function in your code
                 3. Use it with Ollama's tool calling feature
 
                 ```python
-                from {selected_tool_name} import {selected_tool_name}
+                from {actual_tool_name} import {actual_tool_name}
                 import ollama
                 import json
 
@@ -759,7 +956,7 @@ class ToolsPage:
                 response = ollama.chat(
                     model='llama3',  # Use a model that supports tool calling
                     messages=[
-                        {{'role': 'user', 'content': 'I need help with something that requires {selected_tool_name}'}}
+                        {{'role': 'user', 'content': 'I need help with something that requires {actual_tool_name}'}}
                     ],
                     tools=tools,
                     tool_choice='auto'
@@ -768,12 +965,12 @@ class ToolsPage:
                 # Handle tool calls from the model
                 if 'tool_calls' in response['message']:
                     for tool_call in response['message']['tool_calls']:
-                        if tool_call['function']['name'] == '{selected_tool_name}':
+                        if tool_call['function']['name'] == '{actual_tool_name}':
                             # Parse arguments
                             arguments = json.loads(tool_call['function']['arguments'])
 
                             # Execute the function with the provided arguments
-                            result = {selected_tool_name}(**arguments)
+                            result = {actual_tool_name}(**arguments)
 
                             # Send the result back to the model
                             ollama.chat(
@@ -784,7 +981,7 @@ class ToolsPage:
                                     {{
                                         'role': 'tool',
                                         'tool_call_id': tool_call['id'],
-                                        'name': '{selected_tool_name}',
+                                        'name': '{actual_tool_name}',
                                         'content': json.dumps(result)
                                     }}
                                 ]
@@ -792,6 +989,57 @@ class ToolsPage:
                 ```
                 """
                 )
+
+            # Add an option to test the code if applicable
+            with st.expander("Test Code (Experimental)"):
+                st.warning(
+                    "This will attempt to execute the code in a controlled environment."
+                )
+
+                # Create input fields for parameters based on the tool definition
+                parameters = {}
+                properties = selected_tool_data["function"]["parameters"]["properties"]
+                required = selected_tool_data["function"]["parameters"].get(
+                    "required", []
+                )
+
+                # Create input fields for each parameter
+                for param_name, param_info in properties.items():
+                    param_type = param_info.get("type", "string")
+                    param_desc = param_info.get("description", "")
+
+                    if param_type == "string":
+                        parameters[param_name] = st.text_input(
+                            f"{param_name} ({param_desc})",
+                            key=f"test_param_{actual_tool_name}_{param_name}",
+                        )
+                    elif param_type == "number" or param_type == "integer":
+                        parameters[param_name] = st.number_input(
+                            f"{param_name} ({param_desc})",
+                            key=f"test_param_{actual_tool_name}_{param_name}",
+                        )
+                    elif param_type == "boolean":
+                        parameters[param_name] = st.checkbox(
+                            f"{param_name} ({param_desc})",
+                            key=f"test_param_{actual_tool_name}_{param_name}",
+                        )
+
+                # Test execution button
+                if st.button("Test Function", key=f"test_exec_{actual_tool_name}"):
+                    # Validate required parameters
+                    missing_params = [p for p in required if not parameters.get(p)]
+                    if missing_params:
+                        st.error(
+                            f"Missing required parameters: {', '.join(missing_params)}"
+                        )
+                    else:
+                        st.info(
+                            "This would execute the function with the provided parameters."
+                        )
+                        st.code(
+                            f"{actual_tool_name}({', '.join([f'{k}={repr(v)}' for k, v in parameters.items()])})"
+                        )
+                        # Note: Actual execution would require a safe execution environment
 
     def render(self):
         """Render the tools page"""

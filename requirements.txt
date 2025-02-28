@@ -5,3 +5,5 @@ ollama
 datetime
 markdown
 pygments
+pylint
+streamlit-code-editor
