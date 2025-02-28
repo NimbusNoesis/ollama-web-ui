@@ -60,6 +60,35 @@ class ToolLoader:
         return file_path
 
     @staticmethod
+    def get_tool_implementation(tool_name: str) -> Optional[str]:
+        """
+        Get the source code of a tool implementation.
+
+        Args:
+            tool_name: Name of the tool
+
+        Returns:
+            Source code of the tool implementation or None if not found
+        """
+        ToolLoader.ensure_tools_dir_exists()
+        tools_dir = ToolLoader.get_tools_dir()
+
+        # Sanitize tool name for filename
+        sanitized_name = "".join(c if c.isalnum() else "_" for c in tool_name)
+        file_path = os.path.join(tools_dir, f"{sanitized_name}.py")
+
+        if os.path.exists(file_path):
+            try:
+                with open(file_path, "r") as f:
+                    return f.read()
+            except Exception as e:
+                logger.error(f"Error reading tool implementation {file_path}: {str(e)}")
+                return None
+        else:
+            logger.warning(f"Tool implementation file not found: {file_path}")
+            return None
+
+    @staticmethod
     def save_tool_definition(tool_name: str, tool_definition: Dict[str, Any]) -> str:
         """
         Save a tool definition to the tools directory.
