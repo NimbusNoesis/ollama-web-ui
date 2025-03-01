@@ -81,4 +81,4 @@ Check out `app/examples/tool_usage_example.py` for a complete working example of
 
 ## License
 
-MIT License
+Apache License 2.0
