@@ -177,6 +177,25 @@ class AgentGroup:
         )
         logger.info(f"Added shared memory to group {self.name} from source: {source}")
 
+    def _format_agent_capabilities(self) -> str:
+        """Format agent capabilities for the manager prompt"""
+        if not self.agents:
+            return "No agents available."
+
+        capabilities = []
+        for agent in self.agents:
+            tools_info = ""
+            if agent.tools:
+                tool_names = [
+                    tool.get("function", {}).get("name", "unknown")
+                    for tool in agent.tools
+                ]
+                tools_info = f" with tools: {', '.join(tool_names)}"
+
+            capabilities.append(f"- {agent.name}: {agent.model} model{tools_info}")
+
+        return "\n".join(capabilities)
+
     def get_manager_prompt(self) -> str:
         """Get the system prompt for the manager agent"""
         return f"""You are the manager of a group of AI agents named '{self.name}'. Your role is to:
@@ -188,20 +207,13 @@ class AgentGroup:
 Available Agents:
 {self._format_agent_capabilities()}
 
-Use the shared memory to maintain context and track progress. Be decisive in task delegation and clear in your communication."""
+IMPORTANT FORMATTING INSTRUCTIONS:
+- When assigning a subtask to an agent, always use the exact format: "Assign to [agent_name]: [subtask description]"
+- When the task is complete, include the phrase "TASK COMPLETE" in your response
+- Be precise with agent names - only assign tasks to agents that exist in the list above
+- Do not assign a task to an agent that doesn't exist
 
-    def _format_agent_capabilities(self) -> str:
-        """Format agent capabilities for the manager prompt"""
-        capabilities = []
-        for agent in self.agents:
-            tools = [t["function"]["name"] for t in agent.tools] if agent.tools else []
-            capabilities.append(
-                f"- {agent.name}:\n"
-                f"  Model: {agent.model}\n"
-                f"  Tools: {', '.join(tools) if tools else 'None'}\n"
-                f"  Role: {agent.system_prompt[:100]}..."
-            )
-        return "\n".join(capabilities)
+Use the shared memory to maintain context and track progress. Be decisive in task delegation and clear in your communication."""
 
     def execute_task_with_manager(self, task: str) -> Dict[str, Any]:
         """Execute a task using a manager agent to coordinate"""
@@ -217,7 +229,11 @@ Use the shared memory to maintain context and track progress. Be decisive in tas
                 {"role": "system", "content": self.get_manager_prompt()},
                 {
                     "role": "user",
-                    "content": f"Task: {task}\n\nAnalyze this task and create a plan using the available agents. For each subtask, specify which agent should handle it and why.",
+                    "content": f"""Task: {task}
+
+Analyze this task and create a plan using the available agents. For each subtask, specify which agent should handle it and why.
+
+IMPORTANT: Your planning should be structured and clear. List each step with the agent who will perform it.""",
                 },
             ]
 
@@ -259,7 +275,16 @@ Use the shared memory to maintain context and track progress. Be decisive in tas
             execution_messages.append(
                 {
                     "role": "user",
-                    "content": "Execute this plan by coordinating with the agents. Process one subtask at a time and aggregate the results.",
+                    "content": """Execute this plan by coordinating with the agents. Process one subtask at a time and aggregate the results.
+
+IMPORTANT FORMATTING REQUIREMENTS:
+1. To assign a task to an agent, use exactly this format: "Assign to [agent_name]: [subtask description]"
+2. When all subtasks are complete, include "TASK COMPLETE" in your response
+
+Example assignment:
+Assign to ResearchAgent: Find the latest research on quantum computing from the past year.
+
+Process each step one at a time and wait for the results before proceeding to the next step.""",
                 }
             )
 
@@ -319,16 +344,46 @@ Use the shared memory to maintain context and track progress. Be decisive in tas
                         execution_messages.append(
                             {
                                 "role": "user",
-                                "content": f"Result from {agent_name}: {result['response']}\n\nWhat's the next step in the plan?",
+                                "content": f"""Result from {agent_name}: {result['response']}
+
+What's the next step in the plan? Remember to use the format: "Assign to [agent_name]: [subtask description]"
+If all steps are complete, include "TASK COMPLETE" in your response.""",
                             }
                         )
                     else:
                         logger.warning(
                             f"Manager tried to assign task to non-existent agent: {agent_name}"
                         )
+                        # Provide feedback to the manager about the error
+                        execution_messages.append(
+                            {"role": "assistant", "content": action}
+                        )
+                        execution_messages.append(
+                            {
+                                "role": "user",
+                                "content": f"""Error: Agent "{agent_name}" does not exist in this group.
+Available agents are: {', '.join([a.name for a in self.agents])}
+
+Please assign the task to one of the available agents using the format: "Assign to [agent_name]: [subtask description]"
+If all steps are complete, include "TASK COMPLETE" in your response.""",
+                            }
+                        )
                 else:
                     logger.warning(
                         f"Manager response didn't follow expected format: {action[:100]}..."
+                    )
+                    # Provide feedback to the manager about the format error
+                    execution_messages.append({"role": "assistant", "content": action})
+                    execution_messages.append(
+                        {
+                            "role": "user",
+                            "content": """Your response format is incorrect. Please use exactly this format to assign a task:
+
+"Assign to [agent_name]: [subtask description]"
+
+If all steps are complete, include "TASK COMPLETE" in your response.
+What's the next step in the plan?""",
+                        }
                     )
 
             # Get final summary from manager
@@ -339,7 +394,7 @@ Use the shared memory to maintain context and track progress. Be decisive in tas
                 + [
                     {
                         "role": "user",
-                        "content": "Provide a final summary of the task execution and results.",
+                        "content": "Provide a final summary of the task execution and results. Include what was accomplished and any conclusions drawn.",
                     }
                 ],
                 stream=False,
