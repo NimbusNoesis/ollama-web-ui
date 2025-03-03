@@ -112,9 +112,23 @@ Use the shared memory to maintain context and track progress. Be decisive in tas
         logger.info(f"Group {self.name} executing task with manager: {task[:50]}...")
 
         try:
-            # Create manager agent with the first available model
-            manager_model = self.agents[0].model if self.agents else "llama2"
-            logger.info(f"Using model {manager_model} for manager agent")
+            # Find the first agent with name "manager" (case-insensitive)
+            manager_agent = next(
+                (agent for agent in self.agents if agent.name.lower() == "manager"),
+                None,
+            )
+
+            # If no manager agent found, use the first agent or default to llama2
+            if manager_agent:
+                manager_model = manager_agent.model
+                logger.info(
+                    f"Using manager agent '{manager_agent.name}' with model {manager_model}"
+                )
+            else:
+                manager_model = self.agents[0].model
+                logger.warning(
+                    f"No agent named 'manager' found. Using model {manager_model} as fallback"
+                )
 
             # Get the base manager prompt
             system_prompt = self.get_manager_prompt()
@@ -133,7 +147,7 @@ Use the shared memory to maintain context and track progress. Be decisive in tas
                     "role": "user",
                     "content": f"""Task: {task}
 
-Analyze this task and create a plan using the available agents. Break it down into clear steps. Respond in JSON and only assign tasks to agents that exist in the group.""",
+Analyze this task and create a plan using the available agents. If an agent does not exist, do not assign it any tasks. Break it down into clear steps. Respond in JSON and only assign tasks to agents that exist in the group.""",
                 },
             ]
 
@@ -142,6 +156,7 @@ Analyze this task and create a plan using the available agents. Break it down in
                 model=manager_model,
                 messages=planning_messages,
                 stream=False,
+                temperature=0.3,
                 format={
                     "type": "object",
                     "properties": {
@@ -302,6 +317,7 @@ Analyze this task and create a plan using the available agents. Break it down in
                 summary_response = OllamaAPI.chat_completion(
                     model=manager_model,
                     messages=summary_messages,
+                    temperature=0.3,
                     stream=False,
                     format={
                         "type": "object",

@@ -132,7 +132,7 @@ Think through your actions first, then list any tools needed, and finally provid
             response = OllamaAPI.chat_completion(
                 model=self.model,
                 messages=messages,
-                temperature=0.7,
+                temperature=0.3,
                 stream=False,
                 tools=self.tools,
                 format=AGENT_RESPONSE_SCHEMA,

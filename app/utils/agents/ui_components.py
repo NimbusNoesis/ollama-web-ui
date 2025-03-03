@@ -6,6 +6,7 @@ import streamlit as st
 import os
 import json
 import traceback
+import re
 from typing import Dict, List, Any, Optional
 
 from app.api.ollama_api import OllamaAPI
@@ -16,6 +17,26 @@ from app.utils.agents.agent_group import AgentGroup
 
 # Get application logger
 logger = get_logger()
+
+
+def process_markdown(content: str) -> str:
+    """
+    Process markdown content for better rendering
+
+    Args:
+        content: The markdown content to process
+
+    Returns:
+        Processed markdown content
+    """
+    if not content:
+        return ""
+
+    # Ensure code blocks are properly formatted
+    # This helps with proper syntax highlighting
+    content = re.sub(r"```(\w+)\n", r"```\1\n", content)
+
+    return content
 
 
 def render_agent_editor(
@@ -39,7 +60,20 @@ def render_agent_editor(
             "Agent Name",
             value=editing_agent.name if editing_agent else "",
         )
-        model = st.selectbox("Model", model_names)
+
+        # Set the default model value correctly when editing
+        default_model_index = 0
+        if editing_agent and editing_agent.model:
+            try:
+                default_model_index = model_names.index(editing_agent.model)
+            except ValueError:
+                # If the model isn't in the list, default to first option
+                logger.warning(
+                    f"Model {editing_agent.model} not found in available models"
+                )
+
+        model = st.selectbox("Model", model_names, index=default_model_index)
+
         system_prompt = st.text_area(
             "System Prompt",
             value=editing_agent.system_prompt if editing_agent else "",
@@ -86,21 +120,27 @@ def render_agent_editor(
                 # Update existing agent
                 agent = editing_agent
                 logger.info(f"Updating existing agent {agent.name} (ID: {agent.id})")
+
+                # Log the changes for debugging
+                logger.info(f"Updating agent properties:")
+                logger.info(f"  Name: {agent.name} -> {name}")
+                logger.info(f"  Model: {agent.model} -> {model}")
+                logger.info(
+                    f"  System prompt length: {len(agent.system_prompt)} -> {len(system_prompt)}"
+                )
+                logger.info(f"  Tools: {len(agent.tools)} -> {len(selected_tools)}")
+
+                # Update the agent properties
                 agent.name = name
                 agent.model = model
                 agent.system_prompt = system_prompt
                 agent.tools = selected_tools
-                logger.info(f"Updated agent with {len(selected_tools)} tools")
 
                 # Check if agent is already in the group, if not, add it
-                agent_in_group = False
-                for existing_agent in selected_group.agents:
-                    if existing_agent.id == agent.id:
-                        agent_in_group = True
-                        logger.info(
-                            f"Agent {agent.name} (ID: {agent.id}) already exists in group"
-                        )
-                        break
+                agent_in_group = any(
+                    existing_agent.id == agent.id
+                    for existing_agent in selected_group.agents
+                )
 
                 if not agent_in_group:
                     logger.info(
@@ -170,7 +210,7 @@ def render_group_view(group: AgentGroup):
     """Render the group details view"""
     logger.info(f"Rendering group view for {group.name}")
     st.subheader(f"Group: {group.name}")
-    st.write(group.description)
+    st.markdown(process_markdown(group.description))
 
     # Group actions
     col1, col2 = st.columns(2)
@@ -196,26 +236,57 @@ def render_group_view(group: AgentGroup):
     if not group.agents:
         st.info("No agents in this group yet")
     else:
-        for i, agent in enumerate(group.agents):
-            with st.expander(f"{agent.name} ({agent.model})"):
-                st.write(f"**System Prompt:** {agent.system_prompt}")
-                if agent.tools:
-                    st.write(
-                        f"**Tools:** {', '.join([t['function']['name'] for t in agent.tools])}"
-                    )
+        # Sort agents by name for consistent display
+        sorted_agents = sorted(group.agents, key=lambda a: a.name)
 
-                col1, col2 = st.columns(2)
-                with col1:
-                    if st.button("Edit", key=f"edit_{i}"):
-                        logger.info(f"Edit button clicked for agent {agent.name}")
-                        st.session_state.editing_agent = agent
-                        st.rerun()
-                with col2:
-                    if st.button("Delete", key=f"delete_{i}"):
-                        logger.info(f"Delete button clicked for agent {agent.name}")
-                        group.agents.remove(agent)
-                        save_agents()
-                        st.rerun()
+        for i, agent in enumerate(sorted_agents):
+            try:
+                with st.expander(f"{agent.name} ({agent.model})"):
+                    st.markdown(f"**System Prompt:**")
+                    st.markdown(process_markdown(agent.system_prompt))
+
+                    if agent.tools:
+                        tool_names = [t["function"]["name"] for t in agent.tools]
+                        st.markdown(f"**Tools:** {', '.join(tool_names)}")
+                    else:
+                        st.markdown("**Tools:** None")
+
+                    # Display agent ID for debugging - using checkbox instead of nested expander
+                    show_debug = st.checkbox("Show Debug Info", key=f"debug_{agent.id}")
+                    if show_debug:
+                        st.markdown(f"**Agent ID:** {agent.id}")
+                        st.markdown(f"**Model:** {agent.model}")
+                        st.markdown(f"**Created At:** {agent.created_at}")
+                        st.markdown("---")
+
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        if st.button("Edit", key=f"edit_{i}"):
+                            logger.info(
+                                f"Edit button clicked for agent {agent.name} (ID: {agent.id})"
+                            )
+                            # Store a reference to the actual agent object
+                            st.session_state.editing_agent = agent
+                            st.rerun()
+                    with col2:
+                        if st.button("Delete", key=f"delete_{i}"):
+                            logger.info(
+                                f"Delete button clicked for agent {agent.name} (ID: {agent.id})"
+                            )
+                            group.agents.remove(agent)
+                            if save_agents():
+                                st.success(
+                                    f"Agent '{agent.name}' deleted successfully!"
+                                )
+                            else:
+                                st.error(
+                                    f"Failed to save changes after deleting agent '{agent.name}'"
+                                )
+                            st.rerun()
+            except Exception as e:
+                st.error(f"Error displaying agent: {str(e)}")
+                logger.error(f"Error displaying agent: {str(e)}")
+                logger.info(f"Exception details: {traceback.format_exc()}")
 
 
 def render_task_executor(group: AgentGroup):
@@ -248,23 +319,23 @@ def render_task_executor(group: AgentGroup):
 
                     # Display plan
                     with st.expander("Execution Plan", expanded=True):
-                        st.write(
-                            f"**Thought Process:** {result['plan']['thought_process']}"
-                        )
-                        st.write("**Steps:**")
+                        st.markdown(f"**Thought Process:**")
+                        st.markdown(process_markdown(result["plan"]["thought_process"]))
+                        st.markdown("**Steps:**")
                         for i, step in enumerate(result["plan"]["steps"]):
-                            st.write(
+                            st.markdown(
                                 f"{i+1}. Assign to **{step['agent']}**: {step['task']}"
                             )
                             if "reason" in step:
-                                st.write(f"   *Reason: {step['reason']}*")
+                                st.markdown(f"   *Reason: {step['reason']}*")
 
                     # Display results
                     with st.expander("Execution Results", expanded=True):
                         for i, step_result in enumerate(result["results"]):
                             if step_result["result"]["status"] == "success":
-                                st.write(
-                                    f"**{step_result['agent']}**: {step_result['result']['response']}"
+                                st.markdown(f"**{step_result['agent']}**:")
+                                st.markdown(
+                                    process_markdown(step_result["result"]["response"])
                                 )
                             else:
                                 st.error(
@@ -273,12 +344,13 @@ def render_task_executor(group: AgentGroup):
 
                     # Display summary
                     with st.expander("Summary", expanded=True):
-                        st.write(f"**Outcome:** {result['outcome']}")
-                        st.write(f"**Summary:** {result['summary']}")
+                        st.markdown(f"**Outcome:** {result['outcome']}")
+                        st.markdown(f"**Summary:**")
+                        st.markdown(process_markdown(result["summary"]))
                         if result.get("next_steps"):
-                            st.write("**Next Steps:**")
+                            st.markdown("**Next Steps:**")
                             for step in result["next_steps"]:
-                                st.write(f"- {step}")
+                                st.markdown(f"- {step}")
                 else:
                     logger.error(
                         f"Agent task execution failed: {result.get('error', 'Unknown error')}"
@@ -319,34 +391,32 @@ def render_task_executor(group: AgentGroup):
                         # Show detailed agent response
                         with st.expander("🤖 Agent Response", expanded=True):
                             st.markdown("### Thought Process")
-                            st.markdown(result["thought_process"])
+                            st.markdown(process_markdown(result["thought_process"]))
 
                             st.markdown("### Response")
-                            st.markdown(result["response"])
+                            st.markdown(process_markdown(result["response"]))
 
                             if result.get("tool_calls"):
                                 st.markdown("### Tools Used")
                                 for tool_call in result["tool_calls"]:
-                                    st.markdown(
-                                        f"""
-                                    **Tool**: {tool_call['tool']}
-                                    ```json
-                                    {json.dumps(tool_call['input'], indent=2)}
-                                    ```
-                                    """
+                                    tool_name = tool_call["tool"]
+                                    tool_input = json.dumps(
+                                        tool_call["input"], indent=2
                                     )
+                                    st.markdown(f"**Tool**: {tool_name}")
+                                    st.markdown(f"```json\n{tool_input}\n```")
 
                         # Show memory context
                         with st.expander("💭 Agent Memory"):
                             recent_memories = agent.memory[-5:] if agent.memory else []
                             for memory in recent_memories:
-                                st.markdown(
-                                    f"""
-                                **{memory['source']}** ({memory['timestamp']})
-                                {memory['content']}
-                                ---
-                                """
-                                )
+                                timestamp = memory["timestamp"]
+                                source = memory["source"]
+                                content = memory["content"]
+
+                                st.markdown(f"**{source}** ({timestamp})")
+                                st.markdown(process_markdown(content))
+                                st.markdown("---")
                     else:
                         logger.error(
                             f"Agent task execution failed: {result.get('error', 'Unknown error')}"
@@ -413,23 +483,49 @@ def save_agents():
         path = os.path.join(data_dir, "agent_groups.json")
         logger.info(f"Will save to path: {path}")
 
-        # Convert groups to dict format
-        data = [group.to_dict() for group in st.session_state["agent_groups"]]
+        # Verify that agent_groups exists in session state
+        if "agent_groups" not in st.session_state:
+            logger.warning("No agent_groups in session state, initializing empty list")
+            st.session_state["agent_groups"] = []
 
-        # Log what we're about to save for debugging
-        logger.info(f"Saving {len(data)} agent groups")
-        for group in data:
-            logger.info(
-                f"Group: {group['name']} (ID: {group['id']}) has {len(group['agents'])} agents"
-            )
-            for agent in group["agents"]:
-                logger.info(f"  - Agent: {agent['name']} (ID: {agent['id']})")
+        # Convert groups to dict format
+        data = []
+        for group in st.session_state["agent_groups"]:
+            try:
+                group_dict = group.to_dict()
+                data.append(group_dict)
+
+                # Log detailed information about each agent for debugging
+                logger.info(
+                    f"Group: {group.name} (ID: {group.id}) has {len(group.agents)} agents"
+                )
+                for agent in group.agents:
+                    logger.info(f"  - Agent: {agent.name} (ID: {agent.id})")
+                    logger.info(f"    Model: {agent.model}")
+                    logger.info(f"    System prompt length: {len(agent.system_prompt)}")
+                    logger.info(f"    Tools: {len(agent.tools)}")
+            except Exception as e:
+                logger.error(f"Error converting group {group.name} to dict: {str(e)}")
+                logger.info(f"Exception details: {traceback.format_exc()}")
+
+        # Create a backup of the existing file if it exists
+        if os.path.exists(path):
+            backup_path = f"{path}.bak"
+            try:
+                import shutil
+
+                shutil.copy2(path, backup_path)
+                logger.info(f"Created backup of agent groups file at {backup_path}")
+            except Exception as e:
+                logger.warning(f"Failed to create backup: {str(e)}")
 
         # Write to file with proper encoding
         with open(path, "w", encoding="utf-8") as f:
-            json.dump(data, f, indent=2)
+            json.dump(data, f, indent=2, ensure_ascii=False)
 
-        logger.info(f"Successfully saved agent groups to {path}")
+        logger.info(f"Successfully saved {len(data)} agent groups to {path}")
+        return True
     except Exception as e:
         logger.error(f"Error saving agent groups: {str(e)}")
         logger.info(f"Exception details: {traceback.format_exc()}")
+        return False
