@@ -69,7 +69,9 @@ class AgentGroup:
             if agent.name.lower() == "manager":
                 continue
 
-            capabilities.append(f"- {agent.name}: {agent.system_prompt}")
+            capabilities.append(
+                f"- Name: {agent.name}\n-- System Prompt: ```{agent.system_prompt}```"
+            )
 
         if not capabilities:
             return "No non-manager agents available."
@@ -80,7 +82,7 @@ class AgentGroup:
         """Get the system prompt for the manager agent"""
         return f"""You are the manager of a group of AI agents named '{self.name}'. Your role is to:
 1. Analyze tasks and break them down into subtasks
-2. Assign subtasks to appropriate agents based on their capabilities
+2. Assign subtasks to appropriate agents based on their capabilities.
 3. Coordinate between agents and aggregate their responses
 4. Maintain group coherence and shared context
 
@@ -136,7 +138,7 @@ Use the shared memory to maintain context and track progress. Be decisive in tas
             # Add shared memory context to the system prompt if available
             if self.shared_memory:
                 memory_context = "Group Memory Context:\n" + "\n".join(
-                    f"- {m['content']}" for m in self.shared_memory[-5:]
+                    f"- {m['content']}" for m in self.shared_memory
                 )
                 system_prompt = f"{system_prompt}\n\n{memory_context}"
 
@@ -208,7 +210,7 @@ Analyze this task and create a plan using the available agents. If an agent does
                         # Share relevant group memory with the agent before executing the task
                         if self.shared_memory:
                             # Get the last 5 shared memories or all if less than 5
-                            relevant_memories = self.shared_memory[-5:]
+                            relevant_memories = self.shared_memory
                             for memory in relevant_memories:
                                 # Add shared memory to agent's individual memory
                                 agent.add_to_memory(
@@ -244,20 +246,9 @@ Analyze this task and create a plan using the available agents. If an agent does
                                 source="execution",
                             )
 
-                            # Share agent's recent individual memories with the group
-                            agent_individual_memories = [
-                                m
-                                for m in agent.memory
-                                if m.get("source") != "group_memory"
-                            ][-3:]
-                            for memory in agent_individual_memories:
-                                if (
-                                    memory.get("source") != "task"
-                                ):  # Skip task descriptions
-                                    self.add_shared_memory(
-                                        f"Agent {agent_name}'s memory: {memory['content']}",
-                                        source=f"agent_{agent_name}",
-                                    )
+                            logger.info(
+                                f"Added memory summary from agent {agent_name} to group shared memory"
+                            )
                         else:
                             self.add_shared_memory(
                                 f"Agent {agent_name} failed task: {subtask}\nError: {result.get('error', 'Unknown error')}",
