@@ -13,6 +13,63 @@ from app.utils.tool_loader import ToolLoader
 # Get application logger
 logger = get_logger()
 
+# JSON Schemas for agent responses
+AGENT_RESPONSE_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "thought_process": {
+            "type": "string",
+            "description": "Agent's reasoning about the task",
+        },
+        "tool_calls": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {"tool": {"type": "string"}, "input": {"type": "object"}},
+                "required": ["tool", "input"],
+            },
+        },
+        "response": {"type": "string", "description": "Agent's final response"},
+    },
+    "required": ["thought_process", "response"],
+}
+
+MANAGER_RESPONSE_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "thought_process": {
+            "type": "string",
+            "description": "Manager's reasoning about task delegation",
+        },
+        "action": {
+            "type": "string",
+            "enum": ["assign_task", "complete"],
+            "description": "What action the manager is taking",
+        },
+        "assignment": {
+            "type": "object",
+            "properties": {"agent": {"type": "string"}, "task": {"type": "string"}},
+            "required": ["agent", "task"],
+        },
+        "summary": {"type": "string", "description": "Summary of completed tasks"},
+    },
+    "required": ["thought_process", "action"],
+}
+
+TOOL_RESPONSE_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "status": {
+            "type": "string",
+            "enum": ["success", "error"],
+            "description": "Status of the tool execution",
+        },
+        "result": {"type": "object", "description": "Tool execution result data"},
+        "error": {"type": "string", "description": "Error message if execution failed"},
+    },
+    "required": ["status"],
+}
+
 
 class Agent:
     """Class representing an individual agent"""
@@ -78,13 +135,23 @@ class Agent:
         # Add relevant memories as context
         if self.memory:
             memory_context = "Previous relevant information:\n" + "\n".join(
-                f"- {m['content']}"
-                for m in self.memory[-5:]  # Last 5 memories
+                f"- {m['content']}" for m in self.memory[-5:]
             )
             messages.append({"role": "system", "content": memory_context})
-            logger.info(
-                f"Added {min(5, len(self.memory))} memories as context for agent {self.name}"
-            )
+
+        # Add JSON formatting instructions
+        messages.append(
+            {
+                "role": "system",
+                "content": """You must respond in JSON format according to this schema:
+            {
+                "thought_process": "Your reasoning about the task",
+                "tool_calls": [{"tool": "tool_name", "input": {}}],
+                "response": "Your final response"
+            }
+            Think through your actions first, then list any tools needed, and finally provide your response.""",
+            }
+        )
 
         # Add the task
         messages.append({"role": "user", "content": task})
@@ -98,40 +165,94 @@ class Agent:
                 temperature=0.7,
                 stream=False,
                 tools=self.tools,
+                format=AGENT_RESPONSE_SCHEMA,
             )
 
-            # Handle different response formats
+            # Extract response content
             if isinstance(response, dict) and "message" in response:
-                content = response["message"].get("content", "")
-                tool_calls = response["message"].get("tool_calls", [])
+                content = response["message"].get("content", "{}")
             else:
-                # Handle object-style response
-                content = getattr(getattr(response, "message", None), "content", "")
-                tool_calls = getattr(
-                    getattr(response, "message", None), "tool_calls", []
+                content = getattr(getattr(response, "message", None), "content", "{}")
+
+            # Parse JSON response
+            try:
+                parsed_response = json.loads(content)
+
+                # Add task and response to memory
+                self.add_to_memory(f"Task: {task}", source="task")
+                self.add_to_memory(
+                    f"Thought process: {parsed_response['thought_process']}",
+                    source="reasoning",
+                )
+                self.add_to_memory(
+                    f"Response: {parsed_response['response']}", source="execution"
                 )
 
-            # Add task and response to memory
-            self.add_to_memory(f"Task: {task}", source="task")
-            self.add_to_memory(f"Response: {content}", source="execution")
+                logger.info(f"Agent {self.name} completed task successfully")
+                return {
+                    "status": "success",
+                    "thought_process": parsed_response["thought_process"],
+                    "response": parsed_response["response"],
+                    "tool_calls": parsed_response.get("tool_calls", []),
+                }
 
-            # Log tool usage if any
-            if tool_calls:
-                logger.info(
-                    f"Agent {self.name} used {len(tool_calls)} tools in response"
-                )
-                for tool in tool_calls:
-                    if isinstance(tool, dict) and "function" in tool:
-                        logger.info(
-                            f"Tool used: {tool['function'].get('name', 'unknown')}"
-                        )
-
-            logger.info(f"Agent {self.name} completed task successfully")
-            return {"status": "success", "response": content, "tool_calls": tool_calls}
+            except json.JSONDecodeError:
+                error_msg = "Failed to parse agent response as JSON"
+                logger.error(f"{error_msg}: {content}")
+                return {"status": "error", "error": error_msg}
 
         except Exception as e:
             logger.error(f"Error when agent {self.name} executed task: {str(e)}")
             logger.info(f"Exception details: {traceback.format_exc()}")
+            return {"status": "error", "error": str(e)}
+
+    def execute_tool(
+        self, tool_name: str, input_data: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """Execute a tool and validate its response"""
+        logger.info(f"Agent {self.name} executing tool: {tool_name}")
+
+        # Find tool definition
+        tool_def = next(
+            (t for t in self.tools if t["function"]["name"] == tool_name), None
+        )
+        if not tool_def:
+            return {
+                "status": "error",
+                "error": f"Tool {tool_name} not found in agent's tools",
+            }
+
+        try:
+            # Execute tool with format validation
+            messages: List[Dict[str, Union[str, List[Any]]]] = [
+                {
+                    "role": "system",
+                    "content": "Execute the tool and return results in JSON format according to the schema.",
+                },
+                {
+                    "role": "user",
+                    "content": json.dumps({"tool": tool_name, "input": input_data}),
+                },
+            ]
+
+            response = OllamaAPI.chat_completion(
+                model=self.model,
+                messages=messages,
+                stream=False,
+                format=TOOL_RESPONSE_SCHEMA,
+            )
+
+            # Extract and parse response
+            if isinstance(response, dict) and "message" in response:
+                content = response["message"].get("content", "{}")
+            else:
+                content = getattr(getattr(response, "message", None), "content", "{}")
+
+            result = json.loads(content)
+            return result
+
+        except Exception as e:
+            logger.error(f"Error executing tool {tool_name}: {str(e)}")
             return {"status": "error", "error": str(e)}
 
 
@@ -208,6 +329,18 @@ Available Agents:
 {self._format_agent_capabilities()}
 
 IMPORTANT FORMATTING INSTRUCTIONS:
+You must respond in valid JSON format with this schema:
+{{
+    "thought_process": "Your analysis of the task and plan",
+    "steps": [
+        {{
+            "agent": "agent_name",
+            "task": "detailed task description",
+            "reason": "why this agent was chosen"
+        }}
+    ]
+}}
+
 - When assigning a subtask to an agent, always use the exact format: "Assign to [agent_name]: [subtask description]"
 - When the task is complete, include the phrase "TASK COMPLETE" in your response
 - Be precise with agent names - only assign tasks to agents that exist in the list above
@@ -224,16 +357,14 @@ Use the shared memory to maintain context and track progress. Be decisive in tas
             manager_model = self.agents[0].model if self.agents else "llama2"
             logger.info(f"Using model {manager_model} for manager agent")
 
-            # Get task planning response from manager
+            # Set up initial planning messages with JSON formatting requirement
             planning_messages: List[Dict[str, Union[str, List[Any]]]] = [
                 {"role": "system", "content": self.get_manager_prompt()},
                 {
                     "role": "user",
                     "content": f"""Task: {task}
 
-Analyze this task and create a plan using the available agents. For each subtask, specify which agent should handle it and why.
-
-IMPORTANT: Your planning should be structured and clear. List each step with the agent who will perform it.""",
+Analyze this task and create a plan using the available agents. Break it down into clear steps. Respond in JSON and only assign tasks to agents that exist in the group.""",
                 },
             ]
 
@@ -245,178 +376,186 @@ IMPORTANT: Your planning should be structured and clear. List each step with the
                 planning_messages.insert(
                     1, {"role": "system", "content": memory_context}
                 )
-                logger.info(
-                    f"Added {min(5, len(self.shared_memory))} group memories to manager context"
-                )
 
-            # Get plan from manager
-            logger.info(
-                f"Requesting plan from manager agent using model {manager_model}"
-            )
+            # Get plan from manager with JSON formatting
             plan_response = OllamaAPI.chat_completion(
-                model=manager_model, messages=planning_messages, stream=False
+                model=manager_model,
+                messages=planning_messages,
+                stream=False,
+                format={
+                    "type": "object",
+                    "properties": {
+                        "thought_process": {"type": "string"},
+                        "steps": {
+                            "type": "array",
+                            "items": {
+                                "type": "object",
+                                "properties": {
+                                    "agent": {"type": "string"},
+                                    "task": {"type": "string"},
+                                    "reason": {"type": "string"},
+                                },
+                                "required": ["agent", "task"],
+                            },
+                        },
+                    },
+                    "required": ["thought_process", "steps"],
+                },
             )
 
-            # Extract plan from response
+            # Parse plan response
             if isinstance(plan_response, dict) and "message" in plan_response:
-                plan = plan_response["message"].get("content", "")
+                plan_content = plan_response["message"].get("content", "{}")
             else:
-                plan = getattr(getattr(plan_response, "message", None), "content", "")
-
-            logger.info(f"Manager agent created plan for task: {plan[:100]}...")
-            self.add_shared_memory(f"Task Planning: {plan}", source="manager")
-
-            # Execute subtasks with individual agents
-            results = []
-            execution_messages: List[Dict[str, Union[str, List[Any]]]] = (
-                planning_messages.copy()
-            )
-            execution_messages.append({"role": "assistant", "content": plan})
-            execution_messages.append(
-                {
-                    "role": "user",
-                    "content": """Execute this plan by coordinating with the agents. Process one subtask at a time and aggregate the results.
-
-IMPORTANT FORMATTING REQUIREMENTS:
-1. To assign a task to an agent, use exactly this format: "Assign to [agent_name]: [subtask description]"
-2. When all subtasks are complete, include "TASK COMPLETE" in your response
-
-Example assignment:
-Assign to ResearchAgent: Find the latest research on quantum computing from the past year.
-
-Process each step one at a time and wait for the results before proceeding to the next step.""",
-                }
-            )
-
-            step_count = 0
-            while True:
-                step_count += 1
-                logger.info(f"Manager execution step {step_count}")
-
-                # Get next action from manager
-                manager_response = OllamaAPI.chat_completion(
-                    model=manager_model, messages=execution_messages, stream=False
+                plan_content = getattr(
+                    getattr(plan_response, "message", None), "content", "{}"
                 )
 
-                # Extract action from response
-                if isinstance(manager_response, dict) and "message" in manager_response:
-                    action = manager_response["message"].get("content", "")
-                else:
-                    action = getattr(
-                        getattr(manager_response, "message", None), "content", ""
-                    )
+            try:
+                plan = json.loads(plan_content)
+                logger.info(f"Manager created plan with {len(plan['steps'])} steps")
+                self.add_shared_memory(
+                    f"Task Planning: {plan['thought_process']}", source="manager"
+                )
 
-                if "TASK COMPLETE" in action:
-                    logger.info(
-                        f"Manager declared task complete after {step_count} steps"
-                    )
-                    break
-
-                # Parse agent assignment from action
-                # Expecting format: "Assign to [agent_name]: [subtask]"
-                if "Assign to" in action:
-                    agent_name = action.split("Assign to")[1].split(":")[0].strip()
-                    subtask = action.split(":", 1)[1].strip()
-
-                    logger.info(
-                        f"Manager assigned subtask to agent {agent_name}: {subtask[:50]}..."
-                    )
-
+                # Execute each step with the assigned agent
+                results = []
+                for step in plan["steps"]:
+                    agent_name = step["agent"]
+                    subtask = step["task"]
                     agent = next((a for a in self.agents if a.name == agent_name), None)
+
                     if agent:
-                        # Execute subtask with assigned agent
-                        logger.info(f"Executing subtask with agent {agent_name}")
+                        logger.info(
+                            f"Executing step with agent {agent_name}: {subtask[:50]}..."
+                        )
                         result = agent.execute_task(subtask)
                         results.append(
-                            {"agent": agent_name, "subtask": subtask, "result": result}
+                            {
+                                "agent": agent_name,
+                                "subtask": subtask,
+                                "reason": step.get("reason", ""),
+                                "result": result,
+                            }
                         )
 
                         # Add result to shared memory
-                        self.add_shared_memory(
-                            f"Agent {agent_name} completed subtask: {subtask}\nResult: {result['response']}",
-                            source="execution",
-                        )
-
-                        # Update manager with result
-                        execution_messages.append(
-                            {"role": "assistant", "content": action}
-                        )
-                        execution_messages.append(
+                        if result["status"] == "success":
+                            self.add_shared_memory(
+                                f"Agent {agent_name} completed task: {subtask}\nThought process: {result.get('thought_process', '')}\nResponse: {result['response']}",
+                                source="execution",
+                            )
+                        else:
+                            self.add_shared_memory(
+                                f"Agent {agent_name} failed task: {subtask}\nError: {result.get('error', 'Unknown error')}",
+                                source="execution",
+                            )
+                    else:
+                        logger.warning(f"Invalid agent name in plan: {agent_name}")
+                        results.append(
                             {
-                                "role": "user",
-                                "content": f"""Result from {agent_name}: {result['response']}
+                                "agent": agent_name,
+                                "subtask": subtask,
+                                "reason": step.get("reason", ""),
+                                "result": {
+                                    "status": "error",
+                                    "error": f"Agent {agent_name} not found",
+                                },
+                            }
+                        )
 
-What's the next step in the plan? Remember to use the format: "Assign to [agent_name]: [subtask description]"
-If all steps are complete, include "TASK COMPLETE" in your response.""",
+                # Get final summary from manager
+                summary_messages: List[Dict[str, Union[str, List[Any]]]] = (
+                    planning_messages.copy()
+                )
+                summary_messages.append(
+                    {"role": "assistant", "content": json.dumps(plan)}
+                )
+
+                # Add results for summary
+                for result in results:
+                    if result["result"]["status"] == "success":
+                        summary_messages.append(
+                            {
+                                "role": "system",
+                                "content": f"Result from {result['agent']}: {result['result']['response']}",
                             }
                         )
                     else:
-                        logger.warning(
-                            f"Manager tried to assign task to non-existent agent: {agent_name}"
-                        )
-                        # Provide feedback to the manager about the error
-                        execution_messages.append(
-                            {"role": "assistant", "content": action}
-                        )
-                        execution_messages.append(
+                        summary_messages.append(
                             {
-                                "role": "user",
-                                "content": f"""Error: Agent "{agent_name}" does not exist in this group.
-Available agents are: {', '.join([a.name for a in self.agents])}
-
-Please assign the task to one of the available agents using the format: "Assign to [agent_name]: [subtask description]"
-If all steps are complete, include "TASK COMPLETE" in your response.""",
+                                "role": "system",
+                                "content": f"Error from {result['agent']}: {result['result'].get('error', 'Unknown error')}",
                             }
                         )
-                else:
-                    logger.warning(
-                        f"Manager response didn't follow expected format: {action[:100]}..."
-                    )
-                    # Provide feedback to the manager about the format error
-                    execution_messages.append({"role": "assistant", "content": action})
-                    execution_messages.append(
-                        {
-                            "role": "user",
-                            "content": """Your response format is incorrect. Please use exactly this format to assign a task:
 
-"Assign to [agent_name]: [subtask description]"
-
-If all steps are complete, include "TASK COMPLETE" in your response.
-What's the next step in the plan?""",
-                        }
-                    )
-
-            # Get final summary from manager
-            logger.info("Requesting final summary from manager agent")
-            summary_response = OllamaAPI.chat_completion(
-                model=manager_model,
-                messages=execution_messages
-                + [
+                summary_messages.append(
                     {
                         "role": "user",
                         "content": "Provide a final summary of the task execution and results. Include what was accomplished and any conclusions drawn.",
                     }
-                ],
-                stream=False,
-            )
-
-            # Extract summary from response
-            if isinstance(summary_response, dict) and "message" in summary_response:
-                summary = summary_response["message"].get("content", "")
-            else:
-                summary = getattr(
-                    getattr(summary_response, "message", None), "content", ""
                 )
 
-            logger.info(f"Manager provided task summary: {summary[:100]}...")
-            self.add_shared_memory(f"Task Summary: {summary}", source="manager")
+                # Get summary with JSON formatting
+                summary_response = OllamaAPI.chat_completion(
+                    model=manager_model,
+                    messages=summary_messages,
+                    stream=False,
+                    format={
+                        "type": "object",
+                        "properties": {
+                            "summary": {"type": "string"},
+                            "outcome": {
+                                "type": "string",
+                                "enum": ["success", "partial", "failure"],
+                            },
+                            "next_steps": {
+                                "type": "array",
+                                "items": {"type": "string"},
+                            },
+                        },
+                        "required": ["summary", "outcome"],
+                    },
+                )
 
-            return {
-                "status": "success",
-                "plan": plan,
-                "results": results,
-                "summary": summary,
-            }
+                # Parse summary response
+                if isinstance(summary_response, dict) and "message" in summary_response:
+                    summary_content = summary_response["message"].get("content", "{}")
+                else:
+                    summary_content = getattr(
+                        getattr(summary_response, "message", None), "content", "{}"
+                    )
+
+                try:
+                    summary_data = json.loads(summary_content)
+                    self.add_shared_memory(
+                        f"Task Summary: {summary_data['summary']}", source="manager"
+                    )
+
+                    return {
+                        "status": "success",
+                        "plan": plan,
+                        "results": results,
+                        "summary": summary_data["summary"],
+                        "outcome": summary_data["outcome"],
+                        "next_steps": summary_data.get("next_steps", []),
+                    }
+
+                except json.JSONDecodeError:
+                    logger.error(
+                        f"Failed to parse manager summary response: {summary_content}"
+                    )
+                    return {
+                        "status": "error",
+                        "error": "Failed to parse manager summary response",
+                    }
+
+            except json.JSONDecodeError:
+                logger.error(f"Failed to parse manager plan response: {plan_content}")
+                return {
+                    "status": "error",
+                    "error": "Failed to parse manager plan response",
+                }
 
         except Exception as e:
             logger.error(
@@ -784,29 +923,55 @@ class AgentsPage:
                         st.success("Task completed successfully!")
 
                         # Show the execution plan
-                        with st.expander("📋 Task Execution Plan", expanded=True):
-                            st.markdown(result["plan"])
+                        with st.expander("📋 Task Planning", expanded=True):
+                            st.write("**Manager's Analysis:**")
+                            st.markdown(result["plan"]["thought_process"])
+                            st.write("**Planned Steps:**")
+                            for step in result["plan"]["steps"]:
+                                st.markdown(f"""
+                                - **Agent**: {step['agent']}
+                                - **Task**: {step['task']}
+                                - **Reason**: {step.get('reason', 'Not specified')}
+                                ---
+                                """)
 
                         # Show individual agent results
                         with st.expander("🤖 Agent Executions", expanded=True):
                             for execution in result["results"]:
-                                st.markdown(f"**Agent**: {execution['agent']}")
-                                st.markdown(f"**Subtask**: {execution['subtask']}")
+                                st.markdown(f"### Agent: {execution['agent']}")
+                                st.markdown(
+                                    f"**Assigned Task**: {execution['subtask']}"
+                                )
                                 if execution["result"]["status"] == "success":
-                                    st.markdown(
-                                        f"**Response**: {execution['result']['response']}"
-                                    )
+                                    st.markdown("**Thought Process:**")
+                                    st.markdown(execution["result"]["thought_process"])
+                                    st.markdown("**Response:**")
+                                    st.markdown(execution["result"]["response"])
                                     if execution["result"].get("tool_calls"):
-                                        st.markdown("**Tools Used**:")
-                                        for tool in execution["result"]["tool_calls"]:
-                                            st.markdown(f"- {tool['function']['name']}")
+                                        st.markdown("**Tools Used:**")
+                                        for tool_call in execution["result"][
+                                            "tool_calls"
+                                        ]:
+                                            st.markdown(f"""
+                                            - Tool: {tool_call['tool']}
+                                              ```json
+                                              {json.dumps(tool_call['input'], indent=2)}
+                                              ```
+                                            """)
                                 else:
                                     st.error(f"Error: {execution['result']['error']}")
                                 st.markdown("---")
 
                         # Show final summary
                         with st.expander("📝 Task Summary", expanded=True):
+                            st.markdown("### Task Outcome")
+                            st.markdown(f"**Status**: {result['outcome']}")
+                            st.markdown("**Summary:**")
                             st.markdown(result["summary"])
+                            if result.get("next_steps"):
+                                st.markdown("**Next Steps:**")
+                                for step in result["next_steps"]:
+                                    st.markdown(f"- {step}")
                     else:
                         logger.error(
                             f"Task execution failed: {result.get('error', 'Unknown error')}"
@@ -852,18 +1017,23 @@ class AgentsPage:
                             )
                             st.success("Task completed!")
 
-                            # Show the agent's response
+                            # Show detailed agent response
                             with st.expander("🤖 Agent Response", expanded=True):
+                                st.markdown("### Thought Process")
+                                st.markdown(result["thought_process"])
+
+                                st.markdown("### Response")
                                 st.markdown(result["response"])
 
-                                # Show tool usage if any
                                 if result.get("tool_calls"):
-                                    logger.info(
-                                        f"Agent {agent.name} used {len(result['tool_calls'])} tools"
-                                    )
-                                    st.markdown("**Tools Used**:")
-                                    for tool in result["tool_calls"]:
-                                        st.markdown(f"- {tool['function']['name']}")
+                                    st.markdown("### Tools Used")
+                                    for tool_call in result["tool_calls"]:
+                                        st.markdown(f"""
+                                        **Tool**: {tool_call['tool']}
+                                        ```json
+                                        {json.dumps(tool_call['input'], indent=2)}
+                                        ```
+                                        """)
 
                             # Show memory context
                             with st.expander("💭 Agent Memory"):
@@ -871,9 +1041,11 @@ class AgentsPage:
                                     agent.memory[-5:] if agent.memory else []
                                 )
                                 for memory in recent_memories:
-                                    st.markdown(
-                                        f"**{memory['source']}** ({memory['timestamp']}): {memory['content']}"
-                                    )
+                                    st.markdown(f"""
+                                    **{memory['source']}** ({memory['timestamp']})
+                                    {memory['content']}
+                                    ---
+                                    """)
                         else:
                             logger.error(
                                 f"Agent task execution failed: {result.get('error', 'Unknown error')}"

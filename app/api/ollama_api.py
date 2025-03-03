@@ -365,6 +365,7 @@ class OllamaAPI:
         temperature: float = 0.7,
         stream: bool = True,
         tools: Any = None,
+        format: Optional[Dict[str, Any]] = None,
     ) -> Union[ollama.ChatResponse, Iterator[str]]:
         """
         Generate a chat completion using Ollama
@@ -376,6 +377,7 @@ class OllamaAPI:
             temperature: Temperature for generation (0.0 to 1.0)
             stream: Whether to stream the response (ignored if tools are used)
             tools: Optional list of tools to provide to the model - can be function references or tool definitions
+            format: Optional JSON Schema object to format the model response
 
         Returns:
             Either a complete response object, a generator of response chunks, or a string iterator for streaming
@@ -398,6 +400,7 @@ class OllamaAPI:
                 model=model,
                 messages=processed_messages,
                 tools=tools,
+                format=format,  # Pass the format parameter to the chat function
             )
             return response
         else:
@@ -427,7 +430,7 @@ class OllamaAPI:
 
                 Remember to maintain context from previous interactions in the conversation.
 
-                Most Important: Always wrap source code in markdown, no exceptions!
+                If a JSON format has been provided. Ensure it is always followed.
                 """
                 messages_with_system.insert(0, {"role": "system", "content": content})
 
@@ -450,19 +453,23 @@ class OllamaAPI:
             # Handle streaming vs non-streaming
             if stream:
                 return OllamaAPI.stream_chat_completion(
-                    model, processed_messages, options
+                    model, processed_messages, options, format
                 )
             else:
                 response = chat(
                     model=model,
                     messages=processed_messages,
                     options=options,
+                    format=format,  # Pass the format parameter to the chat function
                 )
                 return response
 
     @staticmethod
     def stream_chat_completion(
-        model: str, messages: List[Dict[str, str]], options: Dict[str, Any]
+        model: str,
+        messages: List[Dict[str, str]],
+        options: Dict[str, Any],
+        format: Optional[Dict[str, Any]] = None,
     ) -> Iterator[str]:
         """
         Stream chat completion from Ollama
@@ -471,6 +478,7 @@ class OllamaAPI:
             model: The model to use for chat
             messages: Processed messages list
             options: Generation options
+            format: Optional JSON Schema object to format the model response
 
         Returns:
             Iterator that yields text chunks as they are generated
@@ -486,6 +494,7 @@ class OllamaAPI:
                     messages=messages,
                     options=options,
                     stream=True,
+                    format=format,  # Pass the format parameter to the chat function
                 ):
                     # Handle different response formats and ensure we always yield strings
                     if hasattr(chunk, "message") and hasattr(chunk.message, "content"):
