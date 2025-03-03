@@ -17,17 +17,28 @@ os.makedirs(LOGS_DIR, exist_ok=True)
 LOG_FILENAME = f"ollama_ui_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
 LOG_FILE_PATH = os.path.join(LOGS_DIR, LOG_FILENAME)
 
+# Get log level from environment variable (default to INFO if not set)
+LOG_LEVEL_ENV = os.environ.get("OLLAMA_UI_LOG_LEVEL", "INFO").upper()
+LOG_LEVELS = {
+    "DEBUG": logging.DEBUG,
+    "INFO": logging.INFO,
+    "WARNING": logging.WARNING,
+    "ERROR": logging.ERROR,
+    "CRITICAL": logging.CRITICAL,
+}
+LOG_LEVEL = LOG_LEVELS.get(LOG_LEVEL_ENV, logging.INFO)
+
 # Configure logging
 logger = logging.getLogger("ollama_ui")
-logger.setLevel(logging.INFO)
+logger.setLevel(LOG_LEVEL)
 
 # Create file handler
 file_handler = logging.FileHandler(LOG_FILE_PATH)
-file_handler.setLevel(logging.INFO)
+file_handler.setLevel(LOG_LEVEL)
 
 # Create console handler
 console_handler = logging.StreamHandler(sys.stdout)
-console_handler.setLevel(logging.INFO)
+console_handler.setLevel(LOG_LEVEL)
 
 # Create formatter
 formatter = logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
@@ -38,10 +49,33 @@ console_handler.setFormatter(formatter)
 logger.addHandler(file_handler)
 logger.addHandler(console_handler)
 
+# Log the current configuration
+logger.info(f"Logger initialized with level: {LOG_LEVEL_ENV}")
+if LOG_LEVEL == logging.DEBUG:
+    logger.debug("Debug logging is enabled")
+
 
 def get_logger() -> logging.Logger:
     """Get the application logger"""
     return logger
+
+
+def set_log_level(level: str) -> None:
+    """
+    Set the log level for the application logger
+
+    Args:
+        level: The log level to set (DEBUG, INFO, WARNING, ERROR, CRITICAL)
+    """
+    level_upper = level.upper()
+    if level_upper in LOG_LEVELS:
+        numeric_level = LOG_LEVELS[level_upper]
+        logger.setLevel(numeric_level)
+        for handler in logger.handlers:
+            handler.setLevel(numeric_level)
+        logger.info(f"Log level changed to: {level_upper}")
+    else:
+        logger.warning(f"Invalid log level: {level}. Using current level.")
 
 
 def log_exception(e: Exception, context: str = "") -> str:

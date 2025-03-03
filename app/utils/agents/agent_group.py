@@ -6,6 +6,7 @@ from typing import Dict, List, Any, Union, Optional
 import uuid
 import json
 import traceback
+import time
 from datetime import datetime
 
 from app.api.ollama_api import OllamaAPI
@@ -27,8 +28,10 @@ class AgentGroup:
         self.shared_memory: List[Dict] = []
         self.created_at = datetime.now().isoformat()
         logger.info(f"Created new AgentGroup: {name} (ID: {self.id})")
+        logger.debug(f"AgentGroup {name} description: {description}")
 
     def to_dict(self) -> Dict:
+        logger.debug(f"Converting AgentGroup {self.name} to dictionary")
         return {
             "id": self.id,
             "name": self.name,
@@ -40,33 +43,44 @@ class AgentGroup:
 
     @classmethod
     def from_dict(cls, data: Dict) -> "AgentGroup":
+        logger.debug(f"Creating AgentGroup from dictionary: {data.get('name')}")
         group = cls(name=data["name"], description=data["description"])
         group.id = data["id"]
         group.agents = [Agent.from_dict(agent_data) for agent_data in data["agents"]]
         group.shared_memory = data.get("shared_memory", [])
         group.created_at = data["created_at"]
+        logger.debug(
+            f"Restored AgentGroup {group.name} (ID: {group.id}) with {len(group.agents)} agents and {len(group.shared_memory)} shared memories"
+        )
         return group
 
     def add_shared_memory(self, content: str, source: str = "group"):
         """Add a memory entry to the group's shared memory"""
+        timestamp = datetime.now().isoformat()
         self.shared_memory.append(
             {
                 "content": content,
                 "source": source,
-                "timestamp": datetime.now().isoformat(),
+                "timestamp": timestamp,
             }
         )
         logger.info(f"Added shared memory to group {self.name} from source: {source}")
+        logger.debug(f"Shared memory content: {content}, Timestamp: {timestamp}")
 
     def _format_agent_capabilities(self) -> str:
         """Format agent capabilities for the manager prompt"""
+        logger.debug(f"Formatting agent capabilities for group {self.name}")
         if not self.agents:
+            logger.warning(f"No agents available in group {self.name}")
             return "No agents available."
 
         capabilities = []
         for agent in self.agents:
             # Skip any agent with the name "manager" (case-insensitive)
             if agent.name.lower() == "manager":
+                logger.debug(
+                    f"Skipping manager agent {agent.name} in capabilities list"
+                )
                 continue
 
             capabilities.append(
@@ -74,13 +88,18 @@ class AgentGroup:
             )
 
         if not capabilities:
+            logger.warning(f"No non-manager agents available in group {self.name}")
             return "No non-manager agents available."
 
+        logger.debug(
+            f"Formatted capabilities for {len(capabilities)} agents in group {self.name}"
+        )
         return "\n".join(capabilities)
 
     def get_manager_prompt(self) -> str:
         """Get the system prompt for the manager agent"""
-        return f"""You are the manager of a group of AI agents named '{self.name}'. Your role is to:
+        logger.debug(f"Generating manager prompt for group {self.name}")
+        prompt = f"""You are the manager of a group of AI agents named '{self.name}'. Your role is to:
 1. Analyze tasks and break them down into subtasks
 2. Assign subtasks to appropriate agents based on their capabilities.
 3. Coordinate between agents and aggregate their responses
@@ -108,10 +127,13 @@ You must respond in valid JSON format with this schema:
 - Do not assign a task to an agent that doesn't exist
 
 Use the shared memory to maintain context and track progress. Be decisive in task delegation and clear in your communication."""
+        logger.debug(f"Generated manager prompt of length {len(prompt)}")
+        return prompt
 
     def execute_task_with_manager(self, task: str) -> Dict[str, Any]:
         """Execute a task using a manager agent to coordinate"""
-        logger.info(f"Group {self.name} executing task with manager: {task[:50]}...")
+        start_time = time.time()
+        logger.info(f"Group {self.name} executing task with manager: {task}")
 
         try:
             # Find the first agent with name "manager" (case-insensitive)
@@ -127,7 +149,7 @@ Use the shared memory to maintain context and track progress. Be decisive in tas
                     f"Using manager agent '{manager_agent.name}' with model {manager_model}"
                 )
             else:
-                manager_model = self.agents[0].model
+                manager_model = self.agents[0].model if self.agents else "llama2"
                 logger.warning(
                     f"No agent named 'manager' found. Using model {manager_model} as fallback"
                 )
@@ -141,6 +163,9 @@ Use the shared memory to maintain context and track progress. Be decisive in tas
                     f"- {m['content']}" for m in self.shared_memory
                 )
                 system_prompt = f"{system_prompt}\n\n{memory_context}"
+                logger.debug(
+                    f"Added {len(self.shared_memory)} shared memories to manager prompt"
+                )
 
             # Set up messages with a single system prompt followed by the user message
             planning_messages: List[Dict[str, Union[str, List[Any]]]] = [
@@ -154,6 +179,8 @@ Analyze this task and create a plan using the available agents. If an agent does
             ]
 
             # Get plan from manager with JSON formatting
+            logger.info(f"Requesting plan from manager using model {manager_model}")
+            plan_start_time = time.time()
             plan_response = OllamaAPI.chat_completion(
                 model=manager_model,
                 messages=planning_messages,
@@ -179,6 +206,8 @@ Analyze this task and create a plan using the available agents. If an agent does
                     "required": ["thought_process", "steps"],
                 },
             )
+            plan_duration = time.time() - plan_start_time
+            logger.info(f"Received plan from manager in {plan_duration:.2f} seconds")
 
             # Parse plan response
             if isinstance(plan_response, dict) and "message" in plan_response:
@@ -189,6 +218,7 @@ Analyze this task and create a plan using the available agents. If an agent does
                 )
 
             try:
+                logger.debug(f"Parsing plan response: {plan_content}")
                 plan = json.loads(plan_content)
                 logger.info(f"Manager created plan with {len(plan['steps'])} steps")
                 self.add_shared_memory(
@@ -197,14 +227,24 @@ Analyze this task and create a plan using the available agents. If an agent does
 
                 # Execute each step with the assigned agent
                 results = []
-                for step in plan["steps"]:
+                step_count = len(plan["steps"])
+
+                for step_index, step in enumerate(plan["steps"]):
                     agent_name = step["agent"]
                     subtask = step["task"]
+                    reason = step.get("reason", "No reason provided")
+
+                    logger.info(
+                        f"Executing step {step_index+1}/{step_count}: Agent {agent_name}"
+                    )
+                    logger.debug(f"Step {step_index+1} reason: {reason}")
+
                     agent = next((a for a in self.agents if a.name == agent_name), None)
 
                     if agent:
+                        step_start_time = time.time()
                         logger.info(
-                            f"Executing step with agent {agent_name}: {subtask[:50]}..."
+                            f"Executing step with agent {agent_name}: {subtask}"
                         )
 
                         # Share relevant group memory with the agent before executing the task
@@ -221,12 +261,19 @@ Analyze this task and create a plan using the available agents. If an agent does
                             )
 
                         result = agent.execute_task(subtask)
+                        step_duration = time.time() - step_start_time
+                        logger.info(
+                            f"Step {step_index+1} completed in {step_duration:.2f} seconds with status: {result['status']}"
+                        )
 
                         # Add agent's response to its own memory for future reference
                         if result["status"] == "success":
                             agent.add_to_memory(
                                 f"I completed task: {subtask}\nResponse: {result['response']}",
                                 source="self_reflection",
+                            )
+                            logger.debug(
+                                f"Added self-reflection to agent {agent_name}'s memory"
                             )
 
                         results.append(
@@ -235,6 +282,7 @@ Analyze this task and create a plan using the available agents. If an agent does
                                 "subtask": subtask,
                                 "reason": step.get("reason", ""),
                                 "result": result,
+                                "execution_time": step_duration,
                             }
                         )
 
@@ -253,6 +301,9 @@ Analyze this task and create a plan using the available agents. If an agent does
                                 f"Agent {agent_name} failed task: {subtask}\nError: {result.get('error', 'Unknown error')}",
                                 source="execution",
                             )
+                            logger.warning(
+                                f"Agent {agent_name} failed to complete task: {result.get('error', 'Unknown error')}"
+                            )
                     else:
                         logger.warning(f"Invalid agent name in plan: {agent_name}")
                         results.append(
@@ -264,10 +315,14 @@ Analyze this task and create a plan using the available agents. If an agent does
                                     "status": "error",
                                     "error": f"Agent {agent_name} not found",
                                 },
+                                "execution_time": 0,
                             }
                         )
 
                 # Get final summary from manager
+                logger.info("Generating final summary from manager")
+                summary_start_time = time.time()
+
                 summary_messages: List[Dict[str, Union[str, List[Any]]]] = [
                     {"role": "system", "content": system_prompt},
                     {
@@ -304,6 +359,7 @@ Analyze this task and create a plan using the available agents. Break it down in
                     )
 
                 # Get summary with JSON formatting
+                logger.info("Requesting final summary from manager")
                 summary_response = OllamaAPI.chat_completion(
                     model=manager_model,
                     messages=summary_messages,
@@ -325,6 +381,10 @@ Analyze this task and create a plan using the available agents. Break it down in
                         "required": ["summary", "outcome"],
                     },
                 )
+                summary_duration = time.time() - summary_start_time
+                logger.info(
+                    f"Received summary from manager in {summary_duration:.2f} seconds"
+                )
 
                 # Parse summary response
                 if isinstance(summary_response, dict) and "message" in summary_response:
@@ -335,39 +395,64 @@ Analyze this task and create a plan using the available agents. Break it down in
                     )
 
                 try:
+                    logger.debug(f"Parsing summary response: {summary_content}")
                     summary_data = json.loads(summary_content)
                     self.add_shared_memory(
                         f"Task Summary: {summary_data['summary']}", source="manager"
                     )
+
+                    total_duration = time.time() - start_time
+                    outcome = summary_data["outcome"]
+                    logger.info(
+                        f"Task execution completed with outcome: {outcome} in {total_duration:.2f} seconds"
+                    )
+
+                    if "next_steps" in summary_data and summary_data["next_steps"]:
+                        logger.info(
+                            f"Manager suggested {len(summary_data['next_steps'])} next steps"
+                        )
 
                     return {
                         "status": "success",
                         "plan": plan,
                         "results": results,
                         "summary": summary_data["summary"],
-                        "outcome": summary_data["outcome"],
+                        "outcome": outcome,
                         "next_steps": summary_data.get("next_steps", []),
+                        "execution_time": total_duration,
                     }
 
                 except json.JSONDecodeError:
+                    total_duration = time.time() - start_time
                     logger.error(
                         f"Failed to parse manager summary response: {summary_content}"
                     )
                     return {
                         "status": "error",
                         "error": "Failed to parse manager summary response",
+                        "raw_content": summary_content,
+                        "execution_time": total_duration,
                     }
 
             except json.JSONDecodeError:
+                total_duration = time.time() - start_time
                 logger.error(f"Failed to parse manager plan response: {plan_content}")
                 return {
                     "status": "error",
                     "error": "Failed to parse manager plan response",
+                    "raw_content": plan_content,
+                    "execution_time": total_duration,
                 }
 
         except Exception as e:
+            total_duration = time.time() - start_time
             logger.error(
-                f"Error in manager task execution for group {self.name}: {str(e)}"
+                f"Error in manager task execution for group {self.name} ({total_duration:.2f}s): {str(e)}"
             )
-            logger.info(f"Exception details: {traceback.format_exc()}")
-            return {"status": "error", "error": str(e)}
+            logger.debug(f"Task that caused error: {task}")
+            logger.debug(f"Exception details: {traceback.format_exc()}")
+            return {
+                "status": "error",
+                "error": str(e),
+                "execution_time": total_duration,
+            }
