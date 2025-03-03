@@ -65,15 +65,14 @@ class AgentGroup:
 
         capabilities = []
         for agent in self.agents:
-            tools_info = ""
-            if agent.tools:
-                tool_names = [
-                    tool.get("function", {}).get("name", "unknown")
-                    for tool in agent.tools
-                ]
-                tools_info = f" with tools: {', '.join(tool_names)}"
+            # Skip any agent with the name "manager" (case-insensitive)
+            if agent.name.lower() == "manager":
+                continue
 
-            capabilities.append(f"- {agent.name}: {agent.model} model{tools_info}")
+            capabilities.append(f"- {agent.name}: {agent.system_prompt}")
+
+        if not capabilities:
+            return "No non-manager agents available."
 
         return "\n".join(capabilities)
 
@@ -117,9 +116,19 @@ Use the shared memory to maintain context and track progress. Be decisive in tas
             manager_model = self.agents[0].model if self.agents else "llama2"
             logger.info(f"Using model {manager_model} for manager agent")
 
-            # Set up initial planning messages with JSON formatting requirement
+            # Get the base manager prompt
+            system_prompt = self.get_manager_prompt()
+
+            # Add shared memory context to the system prompt if available
+            if self.shared_memory:
+                memory_context = "Group Memory Context:\n" + "\n".join(
+                    f"- {m['content']}" for m in self.shared_memory[-5:]
+                )
+                system_prompt = f"{system_prompt}\n\n{memory_context}"
+
+            # Set up messages with a single system prompt followed by the user message
             planning_messages: List[Dict[str, Union[str, List[Any]]]] = [
-                {"role": "system", "content": self.get_manager_prompt()},
+                {"role": "system", "content": system_prompt},
                 {
                     "role": "user",
                     "content": f"""Task: {task}
@@ -127,15 +136,6 @@ Use the shared memory to maintain context and track progress. Be decisive in tas
 Analyze this task and create a plan using the available agents. Break it down into clear steps. Respond in JSON and only assign tasks to agents that exist in the group.""",
                 },
             ]
-
-            # Add shared memory context
-            if self.shared_memory:
-                memory_context = "Group Memory Context:\n" + "\n".join(
-                    f"- {m['content']}" for m in self.shared_memory[-5:]
-                )
-                planning_messages.insert(
-                    1, {"role": "system", "content": memory_context}
-                )
 
             # Get plan from manager with JSON formatting
             plan_response = OllamaAPI.chat_completion(
@@ -189,7 +189,30 @@ Analyze this task and create a plan using the available agents. Break it down in
                         logger.info(
                             f"Executing step with agent {agent_name}: {subtask[:50]}..."
                         )
+
+                        # Share relevant group memory with the agent before executing the task
+                        if self.shared_memory:
+                            # Get the last 5 shared memories or all if less than 5
+                            relevant_memories = self.shared_memory[-5:]
+                            for memory in relevant_memories:
+                                # Add shared memory to agent's individual memory
+                                agent.add_to_memory(
+                                    f"Group shared: {memory['content']}",
+                                    source="group_memory",
+                                )
+                            logger.info(
+                                f"Shared {len(relevant_memories)} group memories with agent {agent_name}"
+                            )
+
                         result = agent.execute_task(subtask)
+
+                        # Add agent's response to its own memory for future reference
+                        if result["status"] == "success":
+                            agent.add_to_memory(
+                                f"I completed task: {subtask}\nResponse: {result['response']}",
+                                source="self_reflection",
+                            )
+
                         results.append(
                             {
                                 "agent": agent_name,
@@ -205,6 +228,21 @@ Analyze this task and create a plan using the available agents. Break it down in
                                 f"Agent {agent_name} completed task: {subtask}\nThought process: {result.get('thought_process', '')}\nResponse: {result['response']}",
                                 source="execution",
                             )
+
+                            # Share agent's recent individual memories with the group
+                            agent_individual_memories = [
+                                m
+                                for m in agent.memory
+                                if m.get("source") != "group_memory"
+                            ][-3:]
+                            for memory in agent_individual_memories:
+                                if (
+                                    memory.get("source") != "task"
+                                ):  # Skip task descriptions
+                                    self.add_shared_memory(
+                                        f"Agent {agent_name}'s memory: {memory['content']}",
+                                        source=f"agent_{agent_name}",
+                                    )
                         else:
                             self.add_shared_memory(
                                 f"Agent {agent_name} failed task: {subtask}\nError: {result.get('error', 'Unknown error')}",
@@ -225,36 +263,40 @@ Analyze this task and create a plan using the available agents. Break it down in
                         )
 
                 # Get final summary from manager
-                summary_messages: List[Dict[str, Union[str, List[Any]]]] = (
-                    planning_messages.copy()
-                )
-                summary_messages.append(
-                    {"role": "assistant", "content": json.dumps(plan)}
-                )
-
-                # Add results for summary
-                for result in results:
-                    if result["result"]["status"] == "success":
-                        summary_messages.append(
-                            {
-                                "role": "system",
-                                "content": f"Result from {result['agent']}: {result['result']['response']}",
-                            }
-                        )
-                    else:
-                        summary_messages.append(
-                            {
-                                "role": "system",
-                                "content": f"Error from {result['agent']}: {result['result'].get('error', 'Unknown error')}",
-                            }
-                        )
-
-                summary_messages.append(
+                summary_messages: List[Dict[str, Union[str, List[Any]]]] = [
+                    {"role": "system", "content": system_prompt},
                     {
                         "role": "user",
-                        "content": "Provide a final summary of the task execution and results. Include what was accomplished and any conclusions drawn.",
-                    }
-                )
+                        "content": f"""Task: {task}
+
+Analyze this task and create a plan using the available agents. Break it down into clear steps. Respond in JSON and only assign tasks to agents that exist in the group.""",
+                    },
+                    {"role": "assistant", "content": json.dumps(plan)},
+                ]
+
+                # Add results for summary
+                result_content = ""
+                for result in results:
+                    if result["result"]["status"] == "success":
+                        result_content += f"Result from {result['agent']}: {result['result']['response']}\n\n"
+                    else:
+                        result_content += f"Error from {result['agent']}: {result['result'].get('error', 'Unknown error')}\n\n"
+
+                # Add results as a user message
+                if result_content:
+                    summary_messages.append(
+                        {
+                            "role": "user",
+                            "content": f"Here are the results from the agents:\n\n{result_content.strip()}\n\nProvide a final summary of the task execution and results. Include what was accomplished and any conclusions drawn.",
+                        }
+                    )
+                else:
+                    summary_messages.append(
+                        {
+                            "role": "user",
+                            "content": "Provide a final summary of the task execution and results. Include what was accomplished and any conclusions drawn.",
+                        }
+                    )
 
                 # Get summary with JSON formatting
                 summary_response = OllamaAPI.chat_completion(

@@ -75,38 +75,63 @@ class Agent:
         """Execute a task using this agent's capabilities"""
         logger.info(f"Agent {self.name} (ID: {self.id}) executing task: {task[:50]}...")
 
-        messages: List[Dict[str, Union[str, List[Any]]]] = []
+        # Start with the agent's system prompt
+        system_content = self.system_prompt
 
-        # Add relevant memories as context
+        # Add relevant memories as context, prioritizing group shared memory
         if self.memory:
-            memory_context = "Previous relevant information:\n" + "\n".join(
-                f"- {m['content']}" for m in self.memory[-5:]
-            )
-            messages.append({"role": "system", "content": memory_context})
+            # Separate group shared memory from individual memory
+            group_memories = [
+                m for m in self.memory if m.get("source") == "group_memory"
+            ]
+            individual_memories = [
+                m for m in self.memory if m.get("source") != "group_memory"
+            ]
+
+            # Format memory sections
+            memory_sections = []
+
+            # Add group shared memory first if available
+            if group_memories:
+                group_memory_context = "Group Shared Context:\n" + "\n".join(
+                    f"- {m['content']}" for m in group_memories[-5:]
+                )
+                memory_sections.append(group_memory_context)
+
+            # Add individual memories
+            if individual_memories:
+                individual_memory_context = "My Previous Knowledge:\n" + "\n".join(
+                    f"- {m['content']}" for m in individual_memories[-5:]
+                )
+                memory_sections.append(individual_memory_context)
+
+            # Combine all memory sections
+            if memory_sections:
+                system_content += "\n\n" + "\n\n".join(memory_sections)
 
         # Add JSON formatting instructions
-        messages.append(
-            {
-                "role": "system",
-                "content": """You must respond in JSON format according to this schema:
-            {
-                "thought_process": "Your reasoning about the task",
-                "tool_calls": [{"tool": "tool_name", "input": {}}],
-                "response": "Your final response"
-            }
-            Think through your actions first, then list any tools needed, and finally provide your response.""",
-            }
-        )
+        json_format_instructions = """
 
-        # Add the task
-        messages.append({"role": "user", "content": task})
+You must respond in JSON format according to this schema:
+{
+    "thought_process": "Your reasoning about the task",
+    "response": "Your final response"
+}
+Think through your actions first, then list any tools needed, and finally provide your response."""
+
+        system_content += json_format_instructions
+
+        # Create messages list with a single system message followed by the user task
+        messages: List[Dict[str, Union[str, List[Any]]]] = [
+            {"role": "system", "content": system_content},
+            {"role": "user", "content": task},
+        ]
 
         try:
             logger.info(f"Agent {self.name} calling OllamaAPI with model {self.model}")
             response = OllamaAPI.chat_completion(
                 model=self.model,
                 messages=messages,
-                system=self.system_prompt,
                 temperature=0.7,
                 stream=False,
                 tools=self.tools,
