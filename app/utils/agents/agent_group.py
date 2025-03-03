@@ -149,7 +149,7 @@ Use the shared memory to maintain context and track progress. Be decisive in tas
                     "role": "user",
                     "content": f"""Task: {task}
 
-Analyze this task and create a plan using the available agents. If an agent does not exist, do not assign it any tasks. Break it down into clear steps. Respond in JSON and only assign tasks to agents that exist in the group.""",
+Analyze this task and create a plan using the available agents. If an agent does not exist, do not assign it any tasks. Break it down into clear steps. Respond in JSON and only assign tasks to agents that exist in the group. Ensure each agent is called only once in the plan.""",
                 },
             ]
 
@@ -209,7 +209,6 @@ Analyze this task and create a plan using the available agents. If an agent does
 
                         # Share relevant group memory with the agent before executing the task
                         if self.shared_memory:
-                            # Get the last 5 shared memories or all if less than 5
                             relevant_memories = self.shared_memory
                             for memory in relevant_memories:
                                 # Add shared memory to agent's individual memory

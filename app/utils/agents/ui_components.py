@@ -8,6 +8,7 @@ import json
 import traceback
 import re
 from typing import Dict, List, Any, Optional
+import time
 
 from app.api.ollama_api import OllamaAPI
 from app.utils.logger import get_logger
@@ -136,13 +137,20 @@ def render_agent_editor(
                 agent.system_prompt = system_prompt
                 agent.tools = selected_tools
 
-                # Check if agent is already in the group, if not, add it
-                agent_in_group = any(
-                    existing_agent.id == agent.id
-                    for existing_agent in selected_group.agents
-                )
-
-                if not agent_in_group:
+                # Find the agent in the group by ID and update it
+                for i, existing_agent in enumerate(selected_group.agents):
+                    if existing_agent.id == agent.id:
+                        logger.info(
+                            f"Found agent {agent.name} (ID: {agent.id}) in group at index {i}"
+                        )
+                        # Replace the agent in the group with the updated version
+                        selected_group.agents[i] = agent
+                        logger.info(
+                            f"Updated agent in group: {agent.name} (ID: {agent.id}, Model: {agent.model})"
+                        )
+                        break
+                else:
+                    # Agent not found in group, add it
                     logger.info(
                         f"Adding existing agent {name} (ID: {agent.id}) to group {selected_group.name}"
                     )
@@ -445,6 +453,12 @@ def load_agents():
             with open(path, "r", encoding="utf-8") as f:
                 data = json.load(f)
                 logger.info(f"Loaded {len(data)} agent groups from {path}")
+
+                # Clear existing groups if any
+                if "agent_groups" in st.session_state:
+                    st.session_state["agent_groups"] = []
+
+                # Create agent groups from loaded data
                 st.session_state["agent_groups"] = [
                     AgentGroup.from_dict(group_data) for group_data in data
                 ]
@@ -452,17 +466,23 @@ def load_agents():
                 # Log details of loaded groups
                 for group in st.session_state["agent_groups"]:
                     logger.info(
-                        f"Loaded group: {group.name} with {len(group.agents)} agents"
+                        f"Loaded group: {group.name} (ID: {group.id}) with {len(group.agents)} agents"
                     )
                     for agent in group.agents:
-                        logger.info(f"  - Agent: {agent.name} (ID: {agent.id})")
+                        logger.info(
+                            f"  - Agent: {agent.name} (ID: {agent.id}, Model: {agent.model})"
+                        )
         else:
             logger.info(
                 f"Agent groups file not found at {path}. Starting with empty list."
             )
+            # Initialize empty list if file doesn't exist
+            st.session_state["agent_groups"] = []
     except Exception as e:
         logger.error(f"Error loading agent groups: {str(e)}")
         logger.info(f"Exception details: {traceback.format_exc()}")
+        # Initialize empty list on error
+        st.session_state["agent_groups"] = []
 
 
 def save_agents():
@@ -492,6 +512,13 @@ def save_agents():
         data = []
         for group in st.session_state["agent_groups"]:
             try:
+                # Log the group and agent IDs before saving
+                logger.info(f"Saving group: {group.name} (ID: {group.id})")
+                for agent in group.agents:
+                    logger.info(
+                        f"  - Saving agent: {agent.name} (ID: {agent.id}, Model: {agent.model})"
+                    )
+
                 group_dict = group.to_dict()
                 data.append(group_dict)
 
@@ -508,6 +535,15 @@ def save_agents():
                 logger.error(f"Error converting group {group.name} to dict: {str(e)}")
                 logger.info(f"Exception details: {traceback.format_exc()}")
 
+        # Log the actual JSON data being saved
+        try:
+            json_data = json.dumps(data, indent=2, ensure_ascii=False)
+            logger.info(
+                f"JSON data to be saved (first 500 chars): {json_data[:500]}..."
+            )
+        except Exception as e:
+            logger.error(f"Error serializing JSON data: {str(e)}")
+
         # Create a backup of the existing file if it exists
         if os.path.exists(path):
             backup_path = f"{path}.bak"
@@ -522,8 +558,29 @@ def save_agents():
         # Write to file with proper encoding
         with open(path, "w", encoding="utf-8") as f:
             json.dump(data, f, indent=2, ensure_ascii=False)
+            # Ensure data is flushed to disk
+            f.flush()
+            os.fsync(f.fileno())
+
+        # Force a sync to ensure file is written to disk
+        time.sleep(0.1)  # Small delay to ensure file system has time to complete write
 
         logger.info(f"Successfully saved {len(data)} agent groups to {path}")
+
+        # Verify the file was written correctly
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                saved_data = json.load(f)
+                logger.info(f"Verified saved file contains {len(saved_data)} groups")
+                # Check if the first group has the expected agents
+                if saved_data and saved_data[0]["agents"]:
+                    for agent in saved_data[0]["agents"]:
+                        logger.info(
+                            f"  - Verified agent: {agent['name']} (Model: {agent['model']})"
+                        )
+        except Exception as e:
+            logger.error(f"Error verifying saved file: {str(e)}")
+
         return True
     except Exception as e:
         logger.error(f"Error saving agent groups: {str(e)}")
