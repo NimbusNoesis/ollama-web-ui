@@ -84,9 +84,6 @@ class Agent:
             group_memories = [
                 m for m in self.memory if m.get("source") == "group_memory"
             ]
-            individual_memories = [
-                m for m in self.memory if m.get("source") != "group_memory"
-            ]
 
             # Format memory sections
             memory_sections = []
@@ -94,16 +91,9 @@ class Agent:
             # Add group shared memory first if available
             if group_memories:
                 group_memory_context = "Group Shared Context:\n" + "\n".join(
-                    f"- {m['content']}" for m in group_memories[-5:]
+                    f"- {m['content']}" for m in group_memories
                 )
                 memory_sections.append(group_memory_context)
-
-            # Add individual memories
-            if individual_memories:
-                individual_memory_context = "My Previous Knowledge:\n" + "\n".join(
-                    f"- {m['content']}" for m in individual_memories[-5:]
-                )
-                memory_sections.append(individual_memory_context)
 
             # Combine all memory sections
             if memory_sections:
@@ -117,7 +107,9 @@ You must respond in JSON format according to this schema:
     "thought_process": "Your reasoning about the task",
     "response": "Your final response"
 }
-Think through your actions first, then list any tools needed, and finally provide your response."""
+Think through your actions first, then list any tools needed, and finally provide your response.
+
+Always review the provided context to inform your response."""
 
         system_content += json_format_instructions
 
