@@ -1,0 +1,21 @@
+{
+  "type": "function",
+  "function": {
+    "name": "file_write_tool",
+    "description": "Writes content to a file. Overwrites the file if it exists",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "file_path": {
+          "type": "string",
+          "description": "The absolute path to the file to write"
+        },
+        "content": {
+          "type": "string",
+          "description": "The content to write to the file"
+        }
+      },
+      "required": ["file_path", "content"]
+    }
+  }
+}

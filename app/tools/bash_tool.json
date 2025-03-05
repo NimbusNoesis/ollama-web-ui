@@ -1,0 +1,22 @@
+{
+  "type": "function",
+  "function": {
+    "name": "bash_tool",
+    "description": "Executes a given bash command with an optional timeout",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "command": {
+          "type": "string",
+          "description": "The command to execute"
+        },
+        "timeout": {
+          "type": "integer",
+          "description": "Timeout in milliseconds (defaults to 120000 ms)",
+          "default": 120000
+        }
+      },
+      "required": ["command"]
+    }
+  }
+}

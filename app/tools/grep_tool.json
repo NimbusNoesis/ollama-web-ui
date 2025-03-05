@@ -1,0 +1,27 @@
+{
+  "type": "function",
+  "function": {
+    "name": "grep_tool",
+    "description": "Searches file contents using regular expressions",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "pattern": {
+          "type": "string",
+          "description": "The regular expression pattern to search for"
+        },
+        "path": {
+          "type": "string",
+          "description": "The directory to search in (defaults to the current working directory)",
+          "default": null
+        },
+        "include": {
+          "type": "string",
+          "description": "File pattern to include in the search (e.g., *.js, *.{ts,tsx})",
+          "default": null
+        }
+      },
+      "required": ["pattern"]
+    }
+  }
+}
