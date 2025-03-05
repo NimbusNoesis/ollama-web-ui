@@ -18,6 +18,8 @@ from ollama import chat
 import requests
 import streamlit as st
 
+from ..utils import tool_loader
+
 from ..utils.logger import get_logger, exception_handler, ErrorHandler
 
 
@@ -365,6 +367,7 @@ class OllamaAPI:
         temperature: float = 0.7,
         stream: bool = True,
         tools: Any = None,
+        available_functions: Optional[Dict[str, Any]] = None,
         format: Optional[Dict[str, Any]] = None,
     ) -> Union[ollama.ChatResponse, Iterator[str]]:
         """
@@ -385,6 +388,33 @@ class OllamaAPI:
 
         # If tools are provided, we can't use streaming as we need to process tool calls
         if tools:
+            formatted_strings = []
+            functions_keys = available_functions.keys() if available_functions else []
+
+            for function_name in functions_keys:
+                formatted_strings.append(
+                    f'<tool_call>\n{{"name": "{function_name}"}}\n</tool_call>'
+                )
+
+            final_string = "\n\n".join(formatted_strings)
+
+            content = f"""You are a helpful AI assistant with access to previous conversation contexts and various tools.
+Your responses should be informative, engaging, and tailored to the user's needs.
+Carefully review the information from the provided contexts in your responses.
+The contexts are sorted by relevance, with the most relevant context listed first but take into account all previous context.
+Always prefer information from these contexts over making assumptions or using general knowledge. DO NOT use a tool unless the user asks you to do so.
+
+You may call one or more functions to assist with the user query. Don't make assumptions about what values to plug into functions.
+For each function call return a json object with function name and arguments within <tool_call></tool_call> XML tags as follows:
+<tool_call>
+{{"name": <function-name>,"arguments": <args-dict>}}
+</tool_call>
+
+Here are the available tools:
+{final_string}
+"""
+
+            messages.insert(0, {"role": "system", "content": content})
             processed_messages = [
                 {
                     "role": msg["role"],
