@@ -1,13 +1,12 @@
 import os
-import json
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 
 # Assuming a simple file-based memory implementation
 
 MEMORY_DIR = "memory"  # Define a directory to store memory files
 
 
-def memory_read_tool(file_path: str = None) -> Dict[str, Any]:
+def memory_read_tool(file_path: Optional[str] = None) -> Dict[str, Any]:
     """
     Reads from memory. If file_path is provided, reads that specific file.
     Otherwise, returns a list of files in memory and the content of the 'index.md' file.

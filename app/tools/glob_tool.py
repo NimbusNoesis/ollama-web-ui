@@ -1,11 +1,10 @@
 import os
 import glob
-import json
-from typing import Dict, Any, List
+from typing import Dict, Any, Optional
 
 
 def glob_tool(
-    pattern: str, path: str = None, limit: int = 100, offset: int = 0
+    pattern: str, path: Optional[str] = None, limit: int = 100, offset: int = 0
 ) -> Dict[str, Any]:
     """
     Searches for files matching a glob pattern.

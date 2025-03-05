@@ -1,10 +1,8 @@
 import os
-import subprocess
-import json
-from typing import Dict, Any, List
+from typing import Dict, Any, Optional
 
 
-def ls_tool(path: str = None) -> Dict[str, Any]:
+def ls_tool(path: Optional[str] = None) -> Dict[str, Any]:
     """
     Lists files and directories in a given path.
 

@@ -1,10 +1,9 @@
 import os
-import json
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 
 
 def file_read_tool(
-    file_path: str, offset: int = 1, limit: int = None
+    file_path: str, offset: int = 1, limit: Optional[int] = None
 ) -> Dict[str, Any]:
     """
     Reads a file from the local filesystem, with optional offset and limit.

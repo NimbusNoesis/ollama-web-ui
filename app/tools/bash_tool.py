@@ -1,7 +1,5 @@
-import os
 import subprocess
-import json
-from typing import Dict, Any, List
+from typing import Dict, Any
 
 
 def bash_tool(command: str, timeout: int = 120000) -> Dict[str, Any]:
@@ -15,6 +13,7 @@ def bash_tool(command: str, timeout: int = 120000) -> Dict[str, Any]:
     Returns:
         Dict[str, Any]: A dictionary containing the stdout, stderr, and return code, or an error message.
     """
+    process = None
     try:
         process = subprocess.Popen(
             command,
@@ -37,9 +36,9 @@ def bash_tool(command: str, timeout: int = 120000) -> Dict[str, Any]:
             "stderr": stderr_str,
             "return_code": return_code,
         }
-
     except subprocess.TimeoutExpired:
-        process.kill()
+        if process:
+            process.kill()
         return {"error": "Command timed out."}
     except Exception as e:
         return {"error": str(e)}

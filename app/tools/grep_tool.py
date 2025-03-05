@@ -1,11 +1,10 @@
-import os
-import re
 import subprocess
-import json
-from typing import Dict, Any, List
+from typing import Dict, Any, Optional
 
 
-def grep_tool(pattern: str, path: str = None, include: str = None) -> Dict[str, Any]:
+def grep_tool(
+    pattern: str, path: Optional[str] = None, include: Optional[str] = None
+) -> Dict[str, Any]:
     """
     Searches for files containing a specific pattern using grep.
 
