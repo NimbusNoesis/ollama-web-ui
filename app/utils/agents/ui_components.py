@@ -9,6 +9,7 @@ import traceback
 import re
 from typing import Dict, List, Any, Optional
 import time
+from datetime import datetime
 
 from app.api.ollama_api import OllamaAPI
 from app.utils.logger import get_logger
@@ -306,68 +307,48 @@ def render_task_executor(group: AgentGroup):
         st.warning("Add at least one agent to the group before executing tasks")
         return
 
-    task = st.text_area("Enter task for the agent group", height=100)
+    # Check for existing results in session state
+    has_results = "agent_execution_results" in st.session_state
 
-    col1, col2 = st.columns(2)
+    # Task input at the top (full width)
+    task_value = st.session_state.get("current_task", "")
+    task = st.text_area("Enter task for the agent group", value=task_value, height=100)
 
-    with col1:
-        if st.button("Execute with Manager"):
+    # Clear results button if results exist
+    if has_results and st.button("Clear Results"):
+        if "agent_execution_results" in st.session_state:
+            del st.session_state.agent_execution_results
+        logger.info("Cleared execution results from session state")
+        st.rerun()
+
+    # Execution options in tabs
+    st.write("### Execution Options")
+    exec_tab1, exec_tab2 = st.tabs(["Execute with Manager", "Execute with Specific Agent"])
+
+    with exec_tab1:
+        if st.button("Execute Task with Manager"):
             if not task:
                 st.error("Please enter a task")
                 return
 
-            logger.info(f"Execute Task button clicked for group {group.name}")
+            logger.info(f"Execute Task with Manager button clicked for group {group.name}")
             st.write("### Execution Progress")
 
             with st.spinner("Executing task..."):
                 result = group.execute_task_with_manager(task)
 
-                if result["status"] == "success":
-                    st.success("Task completed successfully")
+                # Store results in session state for persistence
+                st.session_state.agent_execution_results = {
+                    "type": "manager",
+                    "task": task,
+                    "result": result,
+                    "timestamp": datetime.now().isoformat()
+                }
 
-                    # Display plan
-                    with st.expander("Execution Plan", expanded=True):
-                        st.markdown(f"**Thought Process:**")
-                        st.markdown(process_markdown(result["plan"]["thought_process"]))
-                        st.markdown("**Steps:**")
-                        for i, step in enumerate(result["plan"]["steps"]):
-                            st.markdown(
-                                f"{i+1}. Assign to **{step['agent']}**: {step['task']}"
-                            )
-                            if "reason" in step:
-                                st.markdown(f"   *Reason: {step['reason']}*")
+                # Force rerun to display results in the results section
+                st.rerun()
 
-                    # Display results
-                    with st.expander("Execution Results", expanded=True):
-                        for i, step_result in enumerate(result["results"]):
-                            if step_result["result"]["status"] == "success":
-                                st.markdown(f"**{step_result['agent']}**:")
-                                st.markdown(
-                                    process_markdown(step_result["result"]["response"])
-                                )
-                            else:
-                                st.error(
-                                    f"**{step_result['agent']}**: Error - {step_result['result'].get('error', 'Unknown error')}"
-                                )
-
-                    # Display summary
-                    with st.expander("Summary", expanded=True):
-                        st.markdown(f"**Outcome:** {result['outcome']}")
-                        st.markdown(f"**Summary:**")
-                        st.markdown(process_markdown(result["summary"]))
-                        if result.get("next_steps"):
-                            st.markdown("**Next Steps:**")
-                            for step in result["next_steps"]:
-                                st.markdown(f"- {step}")
-                else:
-                    logger.error(
-                        f"Agent task execution failed: {result.get('error', 'Unknown error')}"
-                    )
-                    st.error(
-                        f"Task execution failed: {result.get('error', 'Unknown error')}"
-                    )
-
-    with col2:
+    with exec_tab2:
         agent_options = [agent.name for agent in group.agents]
         selected_agent = ""
         if agent_options:
@@ -378,7 +359,7 @@ def render_task_executor(group: AgentGroup):
             )
             logger.info(f"Agent selected in dropdown: {selected_agent}")
 
-        if st.button("Execute with Selected Agent"):
+        if st.button("Execute Task with Selected Agent"):
             logger.info(f"Execute with Selected Agent button clicked: {selected_agent}")
 
             if not task or not selected_agent:
@@ -392,30 +373,126 @@ def render_task_executor(group: AgentGroup):
                 with st.spinner(f"Agent {agent.name} is working on the task..."):
                     result = agent.execute_task(task)
 
-                    if result["status"] == "success":
-                        logger.info(f"Agent {agent.name} completed task successfully")
-                        st.success("Task completed!")
+                    # Store results in session state for persistence
+                    st.session_state.agent_execution_results = {
+                        "type": "single_agent",
+                        "agent_name": agent.name,
+                        "task": task,
+                        "result": result,
+                        "timestamp": datetime.now().isoformat()
+                    }
 
-                        # Show detailed agent response
-                        with st.expander("🤖 Agent Response", expanded=True):
-                            st.markdown("### Thought Process")
-                            st.markdown(process_markdown(result["thought_process"]))
+                    # Force rerun to display results in the results section
+                    st.rerun()
 
-                            st.markdown("### Response")
-                            st.markdown(process_markdown(result["response"]))
+    # Results section (full width) - displayed if there are results in session state
+    if "agent_execution_results" in st.session_state:
+        st.write("---")
+        st.subheader("Execution Results")
+        
+        results_data = st.session_state.agent_execution_results
+        
+        # Add a continue button
+        if st.button("Continue This Task"):
+            # Format previous task and results for continuation
+            if results_data["type"] == "manager":
+                formatted_result = results_data["result"].get("summary", "No summary available")
+            else:
+                formatted_result = results_data["result"].get("response", "No response available")
+                
+            continuation_prompt = f"""Previous task: {results_data['task']}
+            
+Result:
+{formatted_result}
 
-                            if result.get("tool_calls"):
-                                st.markdown("### Tools Used")
-                                for tool_call in result["tool_calls"]:
-                                    tool_name = tool_call["tool"]
-                                    tool_input = json.dumps(
-                                        tool_call["input"], indent=2
-                                    )
-                                    st.markdown(f"**Tool**: {tool_name}")
-                                    st.markdown(f"```json\n{tool_input}\n```")
+Continue from here:
+"""
+            # Set in session state
+            st.session_state.current_task = continuation_prompt
+            st.session_state.in_continuation_mode = True
+            st.rerun()
+            
+        # Show continuation mode indicator
+        if st.session_state.get("in_continuation_mode", False):
+            st.info("✨ You are continuing from a previous task")
+            
+        # Display results based on type
+        if results_data["type"] == "manager":
+            result = results_data["result"]
+            task = results_data["task"]
+            
+            if result["status"] == "success":
+                st.success("Task completed successfully")
 
-                        # Show memory context
-                        with st.expander("💭 Agent Memory"):
+                # Display plan
+                with st.expander("Execution Plan", expanded=True):
+                    st.markdown(f"**Thought Process:**")
+                    st.markdown(process_markdown(result["plan"]["thought_process"]))
+                    st.markdown("**Steps:**")
+                    for i, step in enumerate(result["plan"]["steps"]):
+                        st.markdown(
+                            f"{i+1}. Assign to **{step['agent']}**: {step['task']}"
+                        )
+                        if "reason" in step:
+                            st.markdown(f"   *Reason: {step['reason']}*")
+
+                # Display results
+                with st.expander("Execution Results", expanded=True):
+                    for i, step_result in enumerate(result["results"]):
+                        if step_result["result"]["status"] == "success":
+                            st.markdown(f"**{step_result['agent']}**:")
+                            st.markdown(
+                                process_markdown(step_result["result"]["response"])
+                            )
+                        else:
+                            st.error(
+                                f"**{step_result['agent']}**: Error - {step_result['result'].get('error', 'Unknown error')}"
+                            )
+
+                # Display summary
+                with st.expander("Summary", expanded=True):
+                    st.markdown(f"**Outcome:** {result['outcome']}")
+                    st.markdown(f"**Summary:**")
+                    st.markdown(process_markdown(result["summary"]))
+                    if result.get("next_steps"):
+                        st.markdown("**Next Steps:**")
+                        for step in result["next_steps"]:
+                            st.markdown(f"- {step}")
+            else:
+                st.error(
+                    f"Task execution failed: {result.get('error', 'Unknown error')}"
+                )
+                
+        elif results_data["type"] == "single_agent":
+            result = results_data["result"]
+            agent_name = results_data["agent_name"]
+            
+            if result["status"] == "success":
+                st.success(f"Task completed by {agent_name}!")
+
+                # Show detailed agent response
+                with st.expander("🤖 Agent Response", expanded=True):
+                    st.markdown("### Thought Process")
+                    st.markdown(process_markdown(result["thought_process"]))
+
+                    st.markdown("### Response")
+                    st.markdown(process_markdown(result["response"]))
+
+                    if result.get("tool_calls"):
+                        st.markdown("### Tools Used")
+                        for tool_call in result["tool_calls"]:
+                            tool_name = tool_call["tool"]
+                            tool_input = json.dumps(
+                                tool_call["input"], indent=2
+                            )
+                            st.markdown(f"**Tool**: {tool_name}")
+                            st.markdown(f"```json\n{tool_input}\n```")
+
+                    # Show memory context
+                    with st.expander("💭 Agent Memory"):
+                        # Find the agent to get its memory
+                        agent = next((a for a in group.agents if a.name == agent_name), None)
+                        if agent:
                             recent_memories = agent.memory[-5:] if agent.memory else []
                             for memory in recent_memories:
                                 timestamp = memory["timestamp"]
@@ -425,13 +502,12 @@ def render_task_executor(group: AgentGroup):
                                 st.markdown(f"**{source}** ({timestamp})")
                                 st.markdown(process_markdown(content))
                                 st.markdown("---")
-                    else:
-                        logger.error(
-                            f"Agent task execution failed: {result.get('error', 'Unknown error')}"
-                        )
-                        st.error(
-                            f"Task execution failed: {result.get('error', 'Unknown error')}"
-                        )
+                        else:
+                            st.info("No memory found for this agent")
+            else:
+                st.error(
+                    f"Task execution failed: {result.get('error', 'Unknown error')}"
+                )
 
 
 def load_agents():
