@@ -152,33 +152,98 @@ class AgentsPage:
             else:
                 group_name = st.session_state.selected_group.name
                 logger.info(f"Rendering tabs for group: {group_name}")
-                tab1, tab2 = st.tabs(["Group Details", "Task Execution"])
+                group_tab, task_tab, history_tab = st.tabs(["Group Details", "Task Execution", "Execution History"])
 
-                with tab1:
+                with group_tab:
                     logger.debug(f"Rendering Group Details tab for {group_name}")
                     try:
-                        render_group_view(st.session_state.selected_group)
-                        logger.debug(
-                            f"Successfully rendered group view for {group_name}"
-                        )
+                        # Render group details without inner tabs
+                        st.subheader(f"Group: {group_name}")
+                        st.markdown(f"**Description**: {st.session_state.selected_group.description}")
+                        st.markdown(f"**Created**: {st.session_state.selected_group.created_at}")
+                        st.markdown(f"**Number of Agents**: {len(st.session_state.selected_group.agents)}")
+                        
+                        # Display the agents in this group
+                        st.subheader("Agents in this Group")
+                        for agent in st.session_state.selected_group.agents:
+                            with st.expander(f"{agent.name} ({agent.model})"):
+                                st.markdown(f"**ID**: {agent.id}")
+                                st.markdown(f"**Model**: {agent.model}")
+                                st.markdown("**System Prompt**:")
+                                st.markdown(f"```\n{agent.system_prompt}\n```")
+                                
+                                if agent.tools:
+                                    st.markdown("**Tools**:")
+                                    for tool in agent.tools:
+                                        st.markdown(f"- {tool['function']['name']}: {tool['function']['description']}")
+                                
+                                # Buttons for agent actions
+                                col1, col2 = st.columns(2)
+                                with col1:
+                                    if st.button("Edit Agent", key=f"edit_{agent.id}"):
+                                        st.session_state.editing_agent = agent
+                                        st.session_state.editing_agent_original_group = st.session_state.selected_group
+                                with col2:
+                                    if st.button("Delete Agent", key=f"delete_{agent.id}"):
+                                        confirm_delete = st.checkbox("Confirm deletion", key=f"confirm_{agent.id}")
+                                        if confirm_delete:
+                                            st.session_state.selected_group.agents = [a for a in st.session_state.selected_group.agents if a.id != agent.id]
+                                            load_agents()
+                                            st.success(f"Agent {agent.name} deleted!")
+                                            st.rerun()
+                        
+                        # Display shared memory
+                        if st.session_state.selected_group.shared_memory:
+                            st.subheader("Shared Memory")
+                            with st.expander("View Shared Memory"):
+                                for memory in st.session_state.selected_group.shared_memory[-10:]:
+                                    st.markdown(f"**{memory['source']}** ({memory['timestamp']})")
+                                    st.markdown(memory['content'])
+                                    st.markdown("---")
+                        
+                        # Add group actions
+                        st.subheader("Group Actions")
+                        col1, col2 = st.columns(2)
+                        with col1:
+                            if st.button("Add New Agent"):
+                                st.session_state.editing_agent = next(
+                                    (a for a in st.session_state.selected_group.agents if not a.name), None
+                                ) or {}
+                                st.rerun()
+                        with col2:
+                            if st.button("Delete Group"):
+                                confirm_delete = st.checkbox("Confirm group deletion")
+                                if confirm_delete:
+                                    st.session_state.agent_groups = [g for g in st.session_state.agent_groups if g.id != st.session_state.selected_group.id]
+                                    st.session_state.selected_group = None
+                                    load_agents()
+                                    st.success(f"Group {group_name} deleted!")
+                                    st.rerun()
+                                    
+                        logger.debug(f"Successfully rendered group details for {group_name}")
                     except Exception as e:
-                        error_msg = log_exception(
-                            e, f"Error rendering group view for {group_name}"
-                        )
-                        st.error(f"Failed to render group view: {error_msg}")
+                        error_msg = log_exception(e, f"Error rendering group details for {group_name}")
+                        st.error(f"Failed to render group details: {error_msg}")
 
-                with tab2:
+                with task_tab:
                     logger.debug(f"Rendering Task Execution tab for {group_name}")
                     try:
                         render_task_executor(st.session_state.selected_group)
-                        logger.debug(
-                            f"Successfully rendered task executor for {group_name}"
-                        )
+                        logger.debug(f"Successfully rendered task executor for {group_name}")
                     except Exception as e:
-                        error_msg = log_exception(
-                            e, f"Error rendering task executor for {group_name}"
-                        )
+                        error_msg = log_exception(e, f"Error rendering task executor for {group_name}")
                         st.error(f"Failed to render task executor: {error_msg}")
+                
+                with history_tab:
+                    logger.debug(f"Rendering Execution History tab for {group_name}")
+                    try:
+                        # Import the render_execution_history function
+                        from app.utils.agents.ui_components import render_execution_history
+                        render_execution_history(st.session_state.selected_group)
+                        logger.debug(f"Successfully rendered execution history for {group_name}")
+                    except Exception as e:
+                        error_msg = log_exception(e, f"Error rendering execution history for {group_name}")
+                        st.error(f"Failed to render execution history: {error_msg}")
 
             render_duration = time.time() - render_start_time
             logger.info(
