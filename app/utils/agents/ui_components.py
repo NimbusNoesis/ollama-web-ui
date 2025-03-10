@@ -724,13 +724,8 @@ def render_task_executor(group: AgentGroup):
         st.session_state.parent_execution_id = None
 
     # Display results if available in session state (but not in continuation mode)
-    if not in_continuation_mode and "agent_execution_results" in st.session_state:
+    elif not in_continuation_mode and "agent_execution_results" in st.session_state:
         results_data = st.session_state.agent_execution_results
-
-        # Clear button for results
-        if st.button("🗑️ Clear Results"):
-            del st.session_state.agent_execution_results
-            st.rerun()
 
         # Display based on result type
         if results_data["type"] == "manager":
@@ -765,7 +760,6 @@ def render_task_executor(group: AgentGroup):
             formatted_result = get_formatted_result(results_data)
 
             continuation_prompt = f"""Previous task: {results_data["task"]}
-
 Result:
 {formatted_result}
 
@@ -790,6 +784,9 @@ Continue from here:
                 st.session_state.target_agent = ""
                 st.session_state.selected_agents = []
 
+            st.rerun()
+        if st.button("🗑️ Clear Results"):
+            del st.session_state.agent_execution_results
             st.rerun()
 
 
