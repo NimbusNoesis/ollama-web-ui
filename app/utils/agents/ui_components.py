@@ -21,6 +21,47 @@ from app.utils.agents.agent_group import AgentGroup
 logger = get_logger()
 
 
+def parse_agent_directives(task: str, available_agents: List[Agent]) -> Dict[str, str]:
+    """
+    Parse @agent_name directives in the task text
+    
+    Args:
+        task: The task text to parse
+        available_agents: List of available agents
+        
+    Returns:
+        Dictionary mapping agent names to their subtasks
+    """
+    logger.info(f"Parsing agent directives in task: {task[:50]}...")
+    
+    # Get list of agent names
+    agent_names = [agent.name.lower() for agent in available_agents]
+    
+    # Check for @agent_name pattern
+    directives = {}
+    
+    # Use regex pattern that matches @name: followed by text until the next @name: or end of string
+    pattern = r'@([^:]+):(.*?)(?=@[^:]+:|$)'
+    matches = re.findall(pattern, task, re.DOTALL)
+    
+    for agent_name, subtask in matches:
+        agent_name = agent_name.strip().lower()
+        subtask = subtask.strip()
+        
+        # Check if this is a valid agent
+        for available_name in agent_names:
+            if agent_name == available_name.lower():
+                # Use the correctly cased agent name
+                correct_name = next(a.name for a in available_agents if a.name.lower() == agent_name)
+                directives[correct_name] = subtask
+                logger.info(f"Found directive for agent {correct_name}: {subtask[:30]}...")
+                break
+        else:
+            logger.warning(f"Directive for unknown agent '{agent_name}' found in task")
+    
+    return directives
+
+
 def process_markdown(content: str) -> str:
     """
     Process markdown content for better rendering
@@ -332,9 +373,73 @@ def render_task_executor(group: AgentGroup):
                 return
 
             logger.info(f"Execute Task with Manager button clicked for group {group.name}")
+            
+            # Check if we have agent directives in the task text
+            agent_directives = parse_agent_directives(task, group.agents)
+            
+            # Check if this is a continuation with a specific target
+            target_agent = None
+            if st.session_state.get("in_continuation_mode", False):
+                # Get the target agent from session state if set
+                target_name = st.session_state.get("target_agent", "")
+                if target_name and "manager" not in target_name:
+                    # If a specific agent is targeted, execute with that agent instead
+                    target_agent = next((a for a in group.agents if a.name == target_name), None)
+            
+            # If we have agent directives in the text, handle them directly
+            if agent_directives and len(agent_directives) > 0:
+                logger.info(f"Found {len(agent_directives)} agent directives in task text")
+                st.info(f"Processing {len(agent_directives)} agent directives found in your task")
+                
+                # Execute the directives directly
+                with st.spinner("Processing agent directives..."):
+                    directive_result = execute_task_with_directives(group, task, agent_directives)
+                    
+                    # Store results in session state
+                    st.session_state.agent_execution_results = {
+                        "type": "directive",
+                        "task": task,
+                        "result": directive_result,
+                        "agent_directives": agent_directives,
+                        "timestamp": datetime.now().isoformat()
+                    }
+                    
+                    # Reset continuation mode after execution
+                    st.session_state.in_continuation_mode = False
+                    
+                    # Force rerun to display results
+                    st.rerun()
+                return
+            
+            # If a specific agent is targeted, execute with that agent
+            if target_agent:
+                logger.info(f"Targeting specific agent from dropdown: {target_agent.name}")
+                st.info(f"Executing task directly with {target_agent.name} as specified")
+                
+                with st.spinner(f"Agent {target_agent.name} is working on the task..."):
+                    result = target_agent.execute_task(task)
+                    
+                    # Store results in session state for persistence
+                    st.session_state.agent_execution_results = {
+                        "type": "single_agent",
+                        "agent_name": target_agent.name,
+                        "task": task,
+                        "result": result,
+                        "timestamp": datetime.now().isoformat()
+                    }
+                    
+                    # Reset continuation mode after execution
+                    st.session_state.in_continuation_mode = False
+                    
+                    # Force rerun to display results in the results section
+                    st.rerun()
+                return
+            
+            # If no directives or specific target, proceed with manager execution
             st.write("### Execution Progress")
 
-            with st.spinner("Executing task..."):
+            with st.spinner("Executing task with manager..."):
+                # Use normal manager execution
                 result = group.execute_task_with_manager(task)
 
                 # Store results in session state for persistence
@@ -344,6 +449,9 @@ def render_task_executor(group: AgentGroup):
                     "result": result,
                     "timestamp": datetime.now().isoformat()
                 }
+                
+                # Reset continuation mode after execution
+                st.session_state.in_continuation_mode = False
 
                 # Force rerun to display results in the results section
                 st.rerun()
@@ -351,10 +459,19 @@ def render_task_executor(group: AgentGroup):
     with exec_tab2:
         agent_options = [agent.name for agent in group.agents]
         selected_agent = ""
+        
+        # If we're in continuation mode and have a targeted agent, pre-select it
+        default_index = 0
+        if st.session_state.get("in_continuation_mode", False) and st.session_state.get("target_agent", ""):
+            target = st.session_state.get("target_agent", "")
+            if "manager" not in target and target in agent_options:
+                default_index = agent_options.index(target)
+        
         if agent_options:
             selected_agent = st.selectbox(
                 "Select Agent",
                 options=agent_options,
+                index=default_index,
                 format_func=lambda x: f"🤖 {x}",
             )
             logger.info(f"Agent selected in dropdown: {selected_agent}")
@@ -381,6 +498,9 @@ def render_task_executor(group: AgentGroup):
                         "result": result,
                         "timestamp": datetime.now().isoformat()
                     }
+                    
+                    # Reset continuation mode after execution
+                    st.session_state.in_continuation_mode = False
 
                     # Force rerun to display results in the results section
                     st.rerun()
@@ -391,31 +511,7 @@ def render_task_executor(group: AgentGroup):
         st.subheader("Execution Results")
         
         results_data = st.session_state.agent_execution_results
-        
-        # Add a continue button
-        if st.button("Continue This Task"):
-            # Format previous task and results for continuation
-            if results_data["type"] == "manager":
-                formatted_result = results_data["result"].get("summary", "No summary available")
-            else:
-                formatted_result = results_data["result"].get("response", "No response available")
-                
-            continuation_prompt = f"""Previous task: {results_data['task']}
-            
-Result:
-{formatted_result}
-
-Continue from here:
-"""
-            # Set in session state
-            st.session_state.current_task = continuation_prompt
-            st.session_state.in_continuation_mode = True
-            st.rerun()
-            
-        # Show continuation mode indicator
-        if st.session_state.get("in_continuation_mode", False):
-            st.info("✨ You are continuing from a previous task")
-            
+                    
         # Display results based on type
         if results_data["type"] == "manager":
             result = results_data["result"]
@@ -463,6 +559,49 @@ Continue from here:
                     f"Task execution failed: {result.get('error', 'Unknown error')}"
                 )
                 
+        elif results_data["type"] == "directive":
+            result = results_data["result"]
+            task = results_data["task"]
+            directives = results_data.get("agent_directives", {})
+            
+            if result["status"] == "success":
+                st.success("✅ All agent directives processed successfully")
+                
+                # Display directives summary
+                st.markdown("### Agent Directives Processed")
+                for agent_name, subtask in directives.items():
+                    st.markdown(f"- **@{agent_name}**: {subtask}")
+                
+                # Display results
+                st.markdown("### Results")
+                st.markdown(process_markdown(result["response"]))
+                
+            elif result["status"] == "partial":
+                st.warning("⚠️ Some agent directives processed, but with issues")
+                
+                # Display directive results
+                for agent_result in result["results"]:
+                    agent_name = agent_result["agent"]
+                    subtask = agent_result["subtask"]
+                    response = agent_result["result"].get("response", "No response")
+                    
+                    st.markdown(f"**@{agent_name}**: {subtask}")
+                    st.markdown(process_markdown(response))
+                    st.markdown("---")
+                
+                # Display errors
+                if result["errors"]:
+                    st.error("Errors encountered:")
+                    for error in result["errors"]:
+                        st.markdown(f"- **{error['agent']}**: {error['error']}")
+            else:
+                st.error("❌ Failed to process agent directives")
+                
+                # Display errors
+                if result["errors"]:
+                    for error in result["errors"]:
+                        st.error(f"**{error['agent']}**: {error['error']}")
+                
         elif results_data["type"] == "single_agent":
             result = results_data["result"]
             agent_name = results_data["agent_name"]
@@ -508,6 +647,197 @@ Continue from here:
                 st.error(
                     f"Task execution failed: {result.get('error', 'Unknown error')}"
                 )
+                
+        # Continuation UI - positioned AFTER results display
+        st.write("---")
+        st.subheader("Continue from this Result")
+        
+        # Add a continue button
+        if not st.session_state.get("in_continuation_mode", False):
+            if st.button("Prepare Continuation"):
+                # Format previous task and results for continuation
+                if results_data["type"] == "manager":
+                    formatted_result = results_data["result"].get("summary", "No summary available")
+                elif results_data["type"] == "directive":
+                    formatted_result = results_data["result"].get("response", "No response available")
+                else:
+                    formatted_result = results_data["result"].get("response", "No response available")
+                    
+                continuation_prompt = f"""Previous task: {results_data['task']}
+                
+Result:
+{formatted_result}
+
+Continue from here:
+"""
+                # Set in session state
+                st.session_state.current_task = continuation_prompt
+                st.session_state.in_continuation_mode = True
+                
+                # Store the previous execution type and agent for continuation context
+                st.session_state.previous_execution = {
+                    "type": results_data["type"],
+                    "agent_name": results_data.get("agent_name") if results_data["type"] == "single_agent" else None
+                }
+                
+                st.rerun()
+        
+        # Show continuation mode indicator and targeting options
+        if st.session_state.get("in_continuation_mode", False):
+            col1, col2 = st.columns([3, 1])
+            
+            with col1:
+                st.info("✨ You are continuing from a previous task")
+            
+            with col2:
+                if st.button("Exit Continuation Mode"):
+                    st.session_state.in_continuation_mode = False
+                    st.session_state.current_task = ""
+                    if "target_agent" in st.session_state:
+                        del st.session_state.target_agent
+                    st.rerun()
+            
+            # Add editable continuation prompt
+            edited_prompt = st.text_area(
+                "Edit Continuation Prompt",
+                value=st.session_state.current_task,
+                height=200,
+                help="Edit this prompt to add additional context, questions, or @agent_name directives"
+            )
+            
+            # Update the session state with edited prompt
+            st.session_state.current_task = edited_prompt
+            
+            # Only show targeting options if we're in continuation mode
+            st.write("### Target Specific Agent")
+            
+            # Default targeting option based on previous execution
+            default_target = "manager"
+            if st.session_state.get("previous_execution", {}).get("type") == "single_agent":
+                default_target = st.session_state.get("previous_execution", {}).get("agent_name", "manager")
+            
+            # Create list of targeting options
+            target_options = ["manager (coordinate all agents)"]
+            target_options.extend([agent.name for agent in group.agents])
+            
+            # Find the index of the default target
+            default_index = 0
+            for i, option in enumerate(target_options):
+                if default_target in option:
+                    default_index = i
+                    break
+            
+            # Agent targeting selector
+            target_agent = st.selectbox(
+                "Direct this continuation to:",
+                options=target_options,
+                index=default_index,
+                help="Select which agent should handle this continuation. 'manager' will coordinate all agents."
+            )
+            
+            # Store the selected target in session state
+            st.session_state.target_agent = target_agent
+            
+            # Show syntax help
+            with st.expander("Using @agent_name Syntax"):
+                st.markdown("""
+                You can also use `@agent_name:` syntax directly in your prompt to target specific agents:
+                
+                ```
+                @ResearchAgent: Find information about quantum computing
+                @CodeAgent: Write a Python function that demonstrates quantum superposition
+                ```
+                
+                This allows you to direct different parts of your task to different agents.
+                """)
+            
+            # Display currently targeted agent
+            if st.session_state.get("target_agent"):
+                if "manager" in st.session_state.target_agent:
+                    st.write(f"📣 Your task will be coordinated by the manager")
+                else:
+                    st.write(f"📣 Your task will be sent directly to **{st.session_state.target_agent}**")
+            
+            # Add Execute Continuation button
+            if st.button("Execute Continuation", type="primary"):
+                logger.info("Execute Continuation button clicked")
+                
+                # Get the current task from session state
+                continuation_task = st.session_state.current_task
+                
+                if not continuation_task:
+                    st.error("Please enter a continuation task")
+                    return
+                
+                # Get the targeted agent
+                target_name = st.session_state.get("target_agent", "")
+                target_agent = None
+                
+                # Check for agent directives
+                agent_directives = parse_agent_directives(continuation_task, group.agents)
+                
+                # Determine execution path
+                if agent_directives and len(agent_directives) > 0:
+                    # Use directive execution
+                    logger.info(f"Executing continuation with {len(agent_directives)} directives")
+                    st.info(f"Processing {len(agent_directives)} agent directives in your continuation")
+                    
+                    with st.spinner("Processing agent directives..."):
+                        directive_result = execute_task_with_directives(group, continuation_task, agent_directives)
+                        
+                        # Store results
+                        st.session_state.agent_execution_results = {
+                            "type": "directive",
+                            "task": continuation_task,
+                            "result": directive_result,
+                            "agent_directives": agent_directives,
+                            "timestamp": datetime.now().isoformat()
+                        }
+                
+                elif target_name and "manager" not in target_name:
+                    # Execute with specific agent
+                    target_agent = next((a for a in group.agents if a.name == target_name), None)
+                    
+                    if target_agent:
+                        logger.info(f"Executing continuation with specific agent: {target_name}")
+                        st.info(f"Executing task with {target_name}")
+                        
+                        with st.spinner(f"Agent {target_name} is working on the task..."):
+                            result = target_agent.execute_task(continuation_task)
+                            
+                            # Store results
+                            st.session_state.agent_execution_results = {
+                                "type": "single_agent",
+                                "agent_name": target_name,
+                                "task": continuation_task,
+                                "result": result,
+                                "timestamp": datetime.now().isoformat()
+                            }
+                    else:
+                        st.error(f"Agent {target_name} not found")
+                        return
+                
+                else:
+                    # Execute with manager
+                    logger.info("Executing continuation with manager")
+                    st.info("Executing task with manager coordination")
+                    
+                    with st.spinner("Manager is coordinating task execution..."):
+                        result = group.execute_task_with_manager(continuation_task)
+                        
+                        # Store results
+                        st.session_state.agent_execution_results = {
+                            "type": "manager",
+                            "task": continuation_task,
+                            "result": result,
+                            "timestamp": datetime.now().isoformat()
+                        }
+                
+                # Reset continuation mode
+                st.session_state.in_continuation_mode = False
+                
+                # Rerun to show results
+                st.rerun()
 
 
 def load_agents():
@@ -662,3 +992,95 @@ def save_agents():
         logger.error(f"Error saving agent groups: {str(e)}")
         logger.info(f"Exception details: {traceback.format_exc()}")
         return False
+
+
+def execute_task_with_directives(group: AgentGroup, task: str, directives: Dict[str, str]) -> Dict:
+    """
+    Execute a task with explicit agent directives
+    
+    Args:
+        group: The agent group
+        task: The original task
+        directives: Dictionary mapping agent names to their specific subtasks
+        
+    Returns:
+        Results dictionary with combined output from all agents
+    """
+    logger.info(f"Executing task with explicit directives for {len(directives)} agents")
+    
+    results = []
+    errors = []
+    
+    # First execute any agent-specific directives
+    for agent_name, subtask in directives.items():
+        logger.info(f"Executing directive for {agent_name}: {subtask[:50]}...")
+        
+        # Find the agent
+        agent = next((a for a in group.agents if a.name == agent_name), None)
+        if not agent:
+            error_msg = f"Agent {agent_name} not found in group"
+            logger.error(error_msg)
+            errors.append({"agent": agent_name, "error": error_msg})
+            continue
+        
+        # Execute the agent's subtask
+        try:
+            agent_result = agent.execute_task(subtask)
+            
+            # Add to results
+            results.append({
+                "agent": agent_name,
+                "subtask": subtask,
+                "result": agent_result
+            })
+            
+            # Add to group's shared memory
+            group.add_shared_memory(
+                f"Agent {agent_name} processed: {subtask}\nResult: {agent_result.get('response', 'No response')}",
+                source="agent_directive"
+            )
+            
+        except Exception as e:
+            error_msg = f"Error executing {agent_name}'s task: {str(e)}"
+            logger.error(error_msg)
+            errors.append({"agent": agent_name, "error": error_msg})
+    
+    # If there's any part of the task not covered by directives,
+    # use the manager to handle the remaining part
+    remaining_task = task
+    
+    # Handle any errors
+    if errors:
+        for error in errors:
+            remaining_task += f"\nNote: Could not process directive for {error['agent']}: {error['error']}"
+    
+    # If all directives were processed successfully, return the results
+    if len(results) == len(directives) and len(errors) == 0:
+        # If the task was fully processed through directives, we're done
+        combined_response = "# Results from Agent Directives\n\n"
+        
+        for result in results:
+            agent_name = result["agent"]
+            subtask = result["subtask"]
+            response = result["result"].get("response", "No response")
+            
+            combined_response += f"## {agent_name}\n\n"
+            combined_response += f"**Task:** {subtask}\n\n"
+            combined_response += f"**Response:**\n{response}\n\n"
+            combined_response += "---\n\n"
+        
+        return {
+            "status": "success",
+            "type": "directive_execution",
+            "results": results,
+            "response": combined_response,
+            "errors": errors
+        }
+    
+    return {
+        "status": "partial" if results else "error",
+        "type": "directive_execution",
+        "results": results,
+        "errors": errors,
+        "remaining_task": remaining_task
+    }

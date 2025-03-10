@@ -253,6 +253,25 @@ You must respond in valid JSON format with this schema:
 6. Manager synthesizes a final response
 7. Results are displayed to the user
 
+### 4.4 Agent Targeting
+
+In addition to manager-coordinated execution, the system supports explicit agent targeting through:
+
+1. **UI-based targeting**: Selecting specific agents via dropdown during task continuation
+2. **@agent_name syntax**: Directing subtasks to specific agents using `@AgentName: subtask` syntax
+
+The directive-based execution pathway:
+1. Parses the task text for @agent_name directives
+2. Maps directives to available agents (with case-insensitive matching)
+3. Executes each directive with its targeted agent
+4. Combines results into a cohesive response
+5. Stores execution context in shared memory
+
+This enables more precise control over which agents handle specific parts of a task, especially useful for:
+- Domain-specific queries that match particular agent specialties
+- Multi-part tasks with clear separation of concerns
+- Follow-up questions to specific agents from previous interactions
+
 ## 5. Memory Systems
 
 ### 5.1 Individual Memory
@@ -382,6 +401,9 @@ Provides interface for:
 - Viewing execution progress
 - Exploring execution results
 - Examining agent reasoning
+- Task continuation with context preservation
+- Agent targeting via dropdown or @agent_name syntax
+- Directive-based execution visualization
 
 ### 8.4 Agent View
 
@@ -389,6 +411,22 @@ Displays:
 - Agent configuration details
 - Edit and delete options
 - Memory inspection
+
+### 8.5 Continuation and Targeting Interface
+
+Provides controls for:
+- Continuing from previous task results
+- Selecting specific agents for targeted execution
+- Exiting continuation mode
+- Viewing targeting help text
+- Displaying targeting status indicators
+
+The continuation interface presents the user with:
+- Previous task context and results
+- Visual indicator for continuation mode
+- Agent targeting options based on previous execution
+- Help text explaining @agent_name syntax
+- Current targeting status feedback
 
 ## 9. Execution Workflow
 
@@ -423,6 +461,30 @@ Displays:
 7. Manager synthesizes final response
 8. Results displayed to user
 9. Key information added to shared memory
+
+### 9.3 Directive-Based Execution
+
+1. Task submitted with @agent_name directives
+2. System parses directives using regex pattern matching
+3. System identifies targeted agents and their subtasks
+4. For each directive:
+   - Find the corresponding agent
+   - Execute subtask with that agent
+   - Add result to collection
+   - Store context in shared memory
+5. System combines all results into unified response
+6. Combined results displayed to user
+7. Directive execution context stored in shared memory
+
+### 9.4 Execution Pathway Selection
+
+The system determines the execution pathway based on:
+
+1. **Explicit UI targeting**: If a specific agent is selected via dropdown
+2. **Directive presence**: If @agent_name syntax is detected in the task
+3. **Default mode**: Falls back to manager coordination if no targeting
+
+This decision flow enables fluid transitions between different execution modes based on the task's needs and user's intent, without requiring explicit mode selection.
 
 ## 10. Extension Points
 

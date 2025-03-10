@@ -41,18 +41,48 @@ This document tracks the implementation progress of improvements to the Agent Sy
 - The `st.rerun()` method was critical for refreshing the UI while maintaining state
 - Explicit state clearing controls give users more predictable interactions
 
-### 3. Task Continuation Capability (Partial)
+### 3. Task Continuation Capability
 
 **Changes Implemented:**
-- Added a "Continue This Task" button to execution results
+- Added a "Prepare Continuation" button to execution results
 - Created continuation prompt formatting that includes previous task and results
 - Added a continuation mode indicator to show when continuing from a previous task
 - Implemented state variables to track continuation status
+- Added an "Exit Continuation Mode" button to cancel a continuation
+- Added a dedicated "Execute Continuation" button to run the prepared continuation
+- Repositioned continuation controls to appear after results for natural flow
+- Added editable text area for modifying the continuation prompt before execution
 
 **Implementation Insights:**
 - The continuation feature needed to handle different result formats from manager vs. single agent executions
 - Visual indicators for continuation mode improve user awareness of context
 - Pre-filling task input with formatted context reduces friction in multi-step workflows
+- Two-step process (prepare then execute) provides clearer workflow than a single continuation button
+- Positioning continuation controls after results creates a more natural conversation flow
+- Editable continuation prompt enables users to add context, questions, or @agent_name directives
+
+### 4. Explicit Agent Targeting for Continuations
+
+**Changes Implemented:**
+- Added agent targeting UI elements to the continuation interface
+- Created a function `parse_agent_directives()` to detect and extract @agent_name: directives
+- Added a targeting dropdown to select a specific agent for continuation
+- Created a new execution mode for directive-based tasks that handles @agent_name syntax
+- Modified the execution flow to respect targeting preferences from both UI and text directives
+- Added UI help section explaining the @agent_name syntax
+
+**Code Changes Summary:**
+- Created new `parse_agent_directives()` function to extract directives from tasks
+- Added `execute_task_with_directives()` function to handle multi-agent directive execution
+- Enhanced the execute button logic to check for directives and handle them appropriately
+- Added result display logic for directive execution results
+- Created help text to explain the directive syntax to users
+
+**Implementation Insights:**
+- The @agent_name syntax provides a natural way to address different agents in a multi-agent system
+- Having both explicit (dropdown) and implicit (syntax) targeting methods provides flexibility
+- Storing previous execution context helps select appropriate default targets for continuations
+- Agent directive results need specialized display formatting for clarity
 
 ## In-Progress Improvements
 
@@ -64,15 +94,7 @@ While the current implementation stores the most recent execution in session sta
 - Persist history to disk via the save mechanism
 - Create a history view UI component
 
-### 2. Explicit Agent Targeting for Continuations
-
-The UI now supports task continuation, but does not yet include explicit agent targeting controls. Next steps include:
-
-- Adding agent selection UI for continuations
-- Implementing @agent_name syntax parsing
-- Modifying execution flow to respect targeting preferences
-
-### 3. Inter-Agent Awareness
+### 2. Inter-Agent Awareness
 
 We have not yet addressed the issue of limited agent awareness of other team members. This will require:
 
@@ -86,9 +108,9 @@ We have not yet addressed the issue of limited agent awareness of other team mem
 
 The implementation revealed the importance of careful session state management in Streamlit applications:
 
-1. **State Keys**: We used descriptive keys (`agent_execution_results`, `current_task`, `in_continuation_mode`) to avoid conflicts
+1. **State Keys**: We used descriptive keys (`agent_execution_results`, `current_task`, `in_continuation_mode`, `target_agent`) to avoid conflicts
 2. **State Persistence**: Session state preserves values across UI re-renders, essential for maintaining context
-3. **State Structure**: We structured state data with type fields (`"type": "manager"` or `"type": "single_agent"`) to handle different execution modes
+3. **State Structure**: We structured state data with type fields to handle different execution modes (manager, single_agent, directive)
 
 ### UI Flow Considerations
 
@@ -97,14 +119,16 @@ Several insights about UI flow emerged during implementation:
 1. **Sequential vs. Parallel**: Vertical sequential flows are more intuitive for task-based interfaces than parallel columns
 2. **Progressive Disclosure**: Using expandable sections (st.expander) helps manage complex information without overwhelming users
 3. **Visual Hierarchy**: Clear section headers and separators improve navigation and readability
+4. **Contextual Help**: Adding help text near relevant controls improves usability for complex features
 
 ### Agent System Architecture Observations
 
 Working with the agent UI revealed some aspects of the underlying architecture:
 
-1. **Result Format Consistency**: The manager and single agent result formats differ, requiring conditional display logic
+1. **Result Format Consistency**: The different execution modes (manager, single agent, directive) have different result structures
 2. **Memory Access**: Agent memory is only accessible through the agent objects, requiring lookups for display
-3. **Execution Isolation**: Each execution is currently isolated, with limited context sharing between runs
+3. **Execution Paths**: The system now supports three distinct execution paths (manager, single agent, directive-based)
+4. **Context Sharing**: The shared memory mechanism enables limited information sharing between agents
 
 ## Next Steps
 
@@ -115,15 +139,15 @@ Working with the agent UI revealed some aspects of the underlying architecture:
    - Modify save/load functions to persist history
    - Create history view UI component
 
-2. **Implement Agent Targeting**:
-   - Add agent targeting UI elements to the continuation interface
-   - Create directive parser (@agent_name syntax)
-   - Modify execution flow to respect targeting preferences
-
-3. **Add Team Awareness**:
+2. **Add Team Awareness**:
    - Create agent capability summary methods
    - Add team context to execution process
    - Implement awareness toggles in the UI
+
+3. **Enhance Directive Execution**:
+   - Add support for combining directive results with manager coordination
+   - Improve error handling and recovery for partial directive execution
+   - Consider adding a visual builder for directives
 
 ### Testing Requirements
 
@@ -132,10 +156,16 @@ Before considering these improvements complete, we should test:
 1. UI behavior across different screen sizes
 2. Performance with large task inputs and complex agent group configurations
 3. State preservation across page navigation and browser sessions
-4. Error handling for edge cases like empty agent groups or malformed tasks
+4. Error handling for edge cases like malformed directives or unavailable agents
+5. Various combinations of targeting methods (dropdown vs. syntax)
 
 ## Conclusion
 
-The first phase of improvements has successfully addressed the most critical UI/UX issues with the Agent System. The new task execution interface provides a more intuitive, readable, and context-aware experience. The task continuation capability lays the groundwork for more complex multi-step workflows.
+We've now completed two major phases of improvements to the Agent System UI/UX:
 
-By continuing with the planned improvements in a phased approach, we can deliver incremental value while building toward a comprehensive multi-agent orchestration system. 
+1. The new task execution interface provides a more intuitive, readable, and context-aware experience
+2. The task continuation and agent targeting capabilities enable sophisticated multi-step workflows
+
+The agent targeting implementation offers multiple ways for users to direct tasks to specific agents, both through UI controls and natural syntax in the prompt. This creates a more flexible and powerful multi-agent experience that better leverages the specialized capabilities of different agents.
+
+By continuing with the planned improvements in a phased approach, we can further enhance the system with history tracking and inter-agent awareness features to build a comprehensive multi-agent orchestration system. 
