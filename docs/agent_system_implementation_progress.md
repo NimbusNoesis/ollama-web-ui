@@ -84,17 +84,68 @@ This document tracks the implementation progress of improvements to the Agent Sy
 - Storing previous execution context helps select appropriate default targets for continuations
 - Agent directive results need specialized display formatting for clarity
 
+### 5. Bug Fixes for Continuation UI
+
+**Changes Implemented:**
+- Fixed nested expander issue in agent results display
+- Restructured expander layout to comply with Streamlit constraints
+- Modularized result display into separate functions for each execution type
+- Added standardized formatting for continuation prompts
+
+**Implementation Insights:**
+- Streamlit doesn't support nested expanders, requiring careful UI design
+- Modular display functions improve code organization and maintainability
+- Standardized formatting functions ensure consistent continuation experience
+
+### 6. Agent Execution History Tracking
+
+**Changes Implemented:**
+- Added `execution_history` array to the `AgentGroup` class
+- Implemented `add_to_history` method for recording executions
+- Updated serialization methods (`to_dict` and `from_dict`) to include history in persistence
+- Created a dedicated history tab in the group view
+- Implemented history filtering by execution type and agent
+- Added detailed history entry viewing with expandable entries
+- Integrated continuation functionality with history entries
+- Added parent/child relationship tracking between continuations
+- Implemented DAG-like structure for tracking continuation chains
+- Created visualization for continuation relationships
+- Added multi-agent execution support
+- Ensured history persistence across application restarts
+
+**Code Changes Summary:**
+- Extended `AgentGroup` class with execution history array and methods
+- Added unique IDs to history entries using UUID
+- Modified all execution paths to record history entries
+- Implemented `render_execution_history` function with filtering options
+- Created `prepare_continuation_from_history` for continuing from any history entry
+- Added `get_continuation_chain` function to visualize continuation relationships
+- Implemented `execute_with_multiple_agents` function for multi-agent execution
+- Added explicit `save_agents()` calls after adding history entries
+- Added parent/child relationship fields to history entries
+
+**Implementation Insights:**
+- History needs distinct data structures for different execution types (manager, single agent, directive, multi-agent)
+- Persistence requires explicit saves after each history entry addition
+- Relationships between continuations create a DAG structure that needs specialized visualization
+- Different execution types require specialized UI components
+- UUID tracking enables complex continuation chains to be reconstructed
+- Filtering is essential for navigating large history sets
+- Multi-agent execution adds a new dimension to the execution history structure
+
+**Key Features:**
+- **Persistent History**: Execution history survives across application restarts
+- **DAG Structure**: History entries form a directed acyclic graph through parent/child relationships
+- **Multi-Agent Support**: Users can execute tasks with multiple selected agents
+- **Flexible Continuation**: Any history entry can be continued from, creating branching workflows
+- **Relationship Visualization**: Parent/child relationships are visually indicated in the history view
+- **Advanced Filtering**: History can be filtered by execution type, agent involvement, and chronology
+- **Chain Visualization**: Full continuation chains can be displayed for any entry
+- **Detailed Context**: Each history entry contains complete execution details
+
 ## In-Progress Improvements
 
-### 1. Agent Execution History Tracking
-
-While the current implementation stores the most recent execution in session state, we have not yet implemented persistent history tracking that survives across sessions. The foundation has been laid with the session state management pattern, but we need to extend this to:
-
-- Store history in the AgentGroup object
-- Persist history to disk via the save mechanism
-- Create a history view UI component
-
-### 2. Inter-Agent Awareness
+### 1. Inter-Agent Awareness
 
 We have not yet addressed the issue of limited agent awareness of other team members. This will require:
 
@@ -108,9 +159,10 @@ We have not yet addressed the issue of limited agent awareness of other team mem
 
 The implementation revealed the importance of careful session state management in Streamlit applications:
 
-1. **State Keys**: We used descriptive keys (`agent_execution_results`, `current_task`, `in_continuation_mode`, `target_agent`) to avoid conflicts
+1. **State Keys**: We used descriptive keys (`agent_execution_results`, `current_task`, `in_continuation_mode`, `target_agent`, `parent_execution_id`) to avoid conflicts
 2. **State Persistence**: Session state preserves values across UI re-renders, essential for maintaining context
-3. **State Structure**: We structured state data with type fields to handle different execution modes (manager, single_agent, directive)
+3. **State Structure**: We structured state data with type fields to handle different execution modes (manager, single_agent, directive, multi_agent)
+4. **Relationship Tracking**: Session state variables track relationships between executions for continuation chains
 
 ### UI Flow Considerations
 
@@ -120,34 +172,39 @@ Several insights about UI flow emerged during implementation:
 2. **Progressive Disclosure**: Using expandable sections (st.expander) helps manage complex information without overwhelming users
 3. **Visual Hierarchy**: Clear section headers and separators improve navigation and readability
 4. **Contextual Help**: Adding help text near relevant controls improves usability for complex features
+5. **Visual Indicators**: Icons and formatting help communicate relationships between continuations
+6. **Tab Structure**: Well-organized tabs prevent UI clutter while maintaining access to all functionality
 
 ### Agent System Architecture Observations
 
 Working with the agent UI revealed some aspects of the underlying architecture:
 
-1. **Result Format Consistency**: The different execution modes (manager, single agent, directive) have different result structures
+1. **Result Format Consistency**: The different execution modes (manager, single agent, directive, multi-agent) have different result structures
 2. **Memory Access**: Agent memory is only accessible through the agent objects, requiring lookups for display
-3. **Execution Paths**: The system now supports three distinct execution paths (manager, single agent, directive-based)
+3. **Execution Paths**: The system now supports four distinct execution paths (manager, single agent, directive-based, multi-agent)
 4. **Context Sharing**: The shared memory mechanism enables limited information sharing between agents
+5. **History vs. Memory**: Agent memory (short-term reasoning context) and execution history (persistent record of all tasks) serve different purposes
+6. **DAG Structures**: The continuation system creates a directed acyclic graph of executions that requires specialized handling
+7. **Multi-Agent Execution**: The system now supports executing tasks with multiple selected agents in parallel
 
 ## Next Steps
 
 ### Immediate Priorities
 
-1. **Complete the History Feature**:
-   - Add execution history storage to the AgentGroup class
-   - Modify save/load functions to persist history
-   - Create history view UI component
-
-2. **Add Team Awareness**:
+1. **Add Team Awareness**:
    - Create agent capability summary methods
    - Add team context to execution process
    - Implement awareness toggles in the UI
 
-3. **Enhance Directive Execution**:
-   - Add support for combining directive results with manager coordination
-   - Improve error handling and recovery for partial directive execution
-   - Consider adding a visual builder for directives
+2. **Enhance History Visualization**:
+   - Add advanced filtering and search for history entries
+   - Enhance visual indicators for continuation relationships
+   - Implement history export functionality
+
+3. **Improve Error Handling**:
+   - Add more robust error recovery for failed executions
+   - Create better feedback for directive parsing errors
+   - Implement validation for continuation inputs
 
 ### Testing Requirements
 
@@ -158,14 +215,23 @@ Before considering these improvements complete, we should test:
 3. State preservation across page navigation and browser sessions
 4. Error handling for edge cases like malformed directives or unavailable agents
 5. Various combinations of targeting methods (dropdown vs. syntax)
+6. History persistence across application restarts
+7. Continuation chain relationships across multiple executions
+8. Multi-agent execution with different agent combinations
 
 ## Conclusion
 
-We've now completed two major phases of improvements to the Agent System UI/UX:
+We've now completed six major improvements to the Agent System UI/UX:
 
-1. The new task execution interface provides a more intuitive, readable, and context-aware experience
-2. The task continuation and agent targeting capabilities enable sophisticated multi-step workflows
+1. **Task Execution UI Layout**: A more intuitive, readable interface with tabbed execution options and full-width results
+2. **Result Persistence**: Preserved execution results for context retention during task refinement
+3. **Task Continuation**: A robust system for multi-step workflows with context preservation
+4. **Agent Targeting**: Multiple ways to direct tasks to specific agents (dropdown and @agent_name syntax)
+5. **Execution History**: A persistent record of all tasks with filtering, detailed viewing, and continuation capabilities
+6. **DAG-Based Continuations**: A sophisticated system for tracking relationships between continuations with visualization
 
-The agent targeting implementation offers multiple ways for users to direct tasks to specific agents, both through UI controls and natural syntax in the prompt. This creates a more flexible and powerful multi-agent experience that better leverages the specialized capabilities of different agents.
+These improvements enable sophisticated multi-agent workflows and dramatically enhance the usability of the agent system. The agent targeting implementation offers multiple ways for users to direct tasks to specific agents, both through UI controls and natural syntax in the prompt. The history feature provides a persistent record that allows users to track, review, and continue from past executions.
 
-By continuing with the planned improvements in a phased approach, we can further enhance the system with history tracking and inter-agent awareness features to build a comprehensive multi-agent orchestration system. 
+The enhanced continuation system with DAG structure support and multi-agent execution capabilities creates a powerful framework for complex reasoning chains and collaborative problem-solving. Users can now create branching workflows, target specific agent combinations, and visualize the relationships between continuations.
+
+By continuing with the planned improvements in a phased approach, we can further enhance the system with inter-agent awareness features to build a truly comprehensive multi-agent orchestration system. 

@@ -20,17 +20,27 @@ logger = get_logger()
 class AgentGroup:
     """Class representing a group of agents that can work together"""
 
-    def __init__(self, name: str, description: str):
-        self.id = str(uuid.uuid4())
+    def __init__(
+        self,
+        name: str,
+        description: str,
+        id: Optional[str] = None,
+        agents: Optional[List[Agent]] = None,
+        shared_memory: Optional[List[Dict[str, Any]]] = None,
+        execution_history: Optional[List[Dict[str, Any]]] = None,
+        created_at: Optional[str] = None,
+    ):
+        self.id = id or str(uuid.uuid4())
         self.name = name
         self.description = description
-        self.agents: List[Agent] = []
-        self.shared_memory: List[Dict] = []
-        self.created_at = datetime.now().isoformat()
+        self.agents = agents or []
+        self.shared_memory = shared_memory or []
+        self.execution_history = execution_history or []
+        self.created_at = created_at or datetime.now().isoformat()
         logger.info(f"Created new AgentGroup: {name} (ID: {self.id})")
         logger.debug(f"AgentGroup {name} description: {description}")
 
-    def to_dict(self) -> Dict:
+    def to_dict(self) -> Dict[str, Any]:
         logger.debug(f"Converting AgentGroup {self.name} to dictionary")
         return {
             "id": self.id,
@@ -38,21 +48,25 @@ class AgentGroup:
             "description": self.description,
             "agents": [agent.to_dict() for agent in self.agents],
             "shared_memory": self.shared_memory,
+            "execution_history": self.execution_history,
             "created_at": self.created_at,
         }
 
     @classmethod
-    def from_dict(cls, data: Dict) -> "AgentGroup":
+    def from_dict(cls, data: Dict[str, Any]) -> "AgentGroup":
         logger.debug(f"Creating AgentGroup from dictionary: {data.get('name')}")
-        group = cls(name=data["name"], description=data["description"])
-        group.id = data["id"]
-        group.agents = [Agent.from_dict(agent_data) for agent_data in data["agents"]]
-        group.shared_memory = data.get("shared_memory", [])
-        group.created_at = data["created_at"]
-        logger.debug(
-            f"Restored AgentGroup {group.name} (ID: {group.id}) with {len(group.agents)} agents and {len(group.shared_memory)} shared memories"
+        # Convert agent dictionaries to Agent objects
+        agents = [Agent.from_dict(agent_data) for agent_data in data.get("agents", [])]
+        
+        return cls(
+            id=data.get("id"),
+            name=data.get("name", "Unnamed Group"),
+            description=data.get("description", ""),
+            agents=agents,
+            shared_memory=data.get("shared_memory", []),
+            execution_history=data.get("execution_history", []),
+            created_at=data.get("created_at"),
         )
-        return group
 
     def add_shared_memory(self, content: str, source: str = "group"):
         """Add a memory entry to the group's shared memory"""
@@ -66,6 +80,28 @@ class AgentGroup:
         )
         logger.info(f"Added shared memory to group {self.name} from source: {source}")
         logger.debug(f"Shared memory content: {content}, Timestamp: {timestamp}")
+
+    def add_to_history(self, entry: Dict[str, Any]):
+        """
+        Add an execution entry to the group's history.
+        
+        Args:
+            entry: Dictionary containing execution details
+        """
+        # Add timestamp and ID if not present
+        if "timestamp" not in entry:
+            entry["timestamp"] = datetime.now().isoformat()
+        
+        if "id" not in entry:
+            entry["id"] = str(uuid.uuid4())
+            
+        self.execution_history.append(entry)
+        
+        # Trim history if it gets too large (keep last 100 entries)
+        if len(self.execution_history) > 100:
+            self.execution_history = self.execution_history[-100:]
+        
+        return entry["id"]
 
     def _format_agent_capabilities(self) -> str:
         """Format agent capabilities for the manager prompt"""
@@ -411,6 +447,28 @@ Analyze this task and create a plan using the available agents. Break it down in
                         logger.info(
                             f"Manager suggested {len(summary_data['next_steps'])} next steps"
                         )
+
+                    # Record in history after execution
+                    history_entry = {
+                        "type": "manager_execution",
+                        "task": task,
+                        "agents_involved": [step["agent"] for step in plan["steps"]],
+                        "result": {
+                            "status": "success",
+                            "plan": plan,
+                            "results": results,
+                            "summary": summary_data["summary"],
+                            "outcome": outcome,
+                            "next_steps": summary_data.get("next_steps", []),
+                        }
+                    }
+                    history_id = self.add_to_history(history_entry)
+                    logger.info(f"Added manager execution to history with ID: {history_id}, current history size: {len(self.execution_history)}")
+                    
+                    # Import and call save_agents to persist changes
+                    from app.utils.agents.ui_components import save_agents
+                    save_agents()
+                    logger.info(f"Saved agent groups with updated history to disk")
 
                     return {
                         "status": "success",

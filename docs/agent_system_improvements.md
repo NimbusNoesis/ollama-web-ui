@@ -332,6 +332,156 @@ def execute_agent_with_team_awareness(self, agent, task, team_aware=True):
 - Creates more coherent multi-agent responses
 - Better emulates human team dynamics
 
+## 1. Agent Group Management
+
+## 2. Agent Targeting Feature
+
+This feature allows users to direct tasks to specific agents instead of routing everything through the manager.
+
+- **Completion status**: ✅ COMPLETED
+- **Complexity**: Medium
+- **Primary benefits**: Flexibility, directness, reduced overhead for simple tasks
+- **Implementation details**:
+  - Added a tab interface to choose between manager and direct targeting
+  - Added agent selection dropdown in the direct targeting tab
+  - Added support for @agent_name: syntax in task prompts
+  - Implemented parser for @agent_name directives
+
+### How It Works
+
+The agent targeting feature works in two ways:
+
+1. **UI-based targeting**:
+   - Users select "Execute with Specific Agent" tab
+   - Choose an agent from the dropdown menu
+   - The task goes directly to that agent, bypassing the manager
+
+2. **Syntax-based targeting**:
+   - Users include @agent_name: directives in their prompt
+   - Example: "@ResearchAgent: Find information about quantum computing"
+   - The system parses these directives and routes subtasks to appropriate agents
+
+### Continuation Workflow Integration
+
+The targeting feature has been integrated with the continuation workflow to support complex reasoning chains:
+
+1. Users can start with manager-directed tasks and then continue with specialists
+2. Users can start with specialist tasks and then continue with others
+3. The system intelligently pre-selects the agent used in the previous execution
+4. Users can override the target selection at any continuation step
+5. The continuation prompt is editable before execution
+6. Multiple sequential continuations can be performed without losing context
+
+This integration supports DAG-like workflows, where you might:
+- Start with the manager coordinating multiple agents
+- Continue with a specific agent for deeper analysis
+- Branch back to the manager for synthesis
+- Split into multiple specialist continuations 
+
+The memory system retains context through these transitions, allowing for complex multi-stage workflows.
+
+## 3. Agent Execution History Tracking
+
+This feature will provide a persistent record of all tasks executed by agent groups.
+
+- **Completion status**: 🔄 PLANNED
+- **Complexity**: High
+- **Primary benefits**: Traceability, learning, continuity across sessions
+- **Implementation details**:
+  - Store execution history in the `AgentGroup` object
+  - Add persistence mechanism to save history to disk
+  - Create UI component for viewing execution history
+  - Integrate with continuation feature
+
+### Distinction from Agent Memory
+
+It's important to clarify the distinction between two related concepts:
+
+1. **Agent Memory**:
+   - Short-term context for agent reasoning
+   - Helps individual agents maintain coherence within a conversation
+   - Limited to recent interactions (typically last 5-10 exchanges)
+   - Used internally by the agent to inform its thinking
+   - Primarily serves the agent's reasoning process
+
+2. **Execution History**:
+   - Long-term record of all tasks and their outcomes
+   - Persists across sessions (saved to disk)
+   - Comprehensive record of all interactions
+   - User-accessible for reference and continuation
+   - Primarily serves the user's need for traceability and continuity
+
+The current implementation has robust agent memory functionality, but the execution history feature will extend this with persistent, user-facing history tracking.
+
+### Data Structure Design
+
+Each history entry will include:
+
+```json
+{
+  "id": "unique_id",
+  "timestamp": "ISO-format timestamp",
+  "task": "The original task prompt",
+  "execution_type": "manager|single_agent|directive",
+  "agents_involved": ["agent1", "agent2"],
+  "result": {
+    "status": "success|error|partial",
+    "response": "The main response text",
+    "details": {}  // Execution-specific details
+  },
+  "metadata": {
+    "continuation_of": "parent_execution_id",  // If this was a continuation
+    "session_id": "session_identifier"
+  }
+}
+```
+
+This structure will allow for rich querying and filtering of history entries.
+
+## 6. Continuation Features
+
+- **Completion status**: ✅ COMPLETED
+- **Complexity**: Medium-High
+- **Primary benefits**: Enable multi-step reasoning, maintain context across executions
+- **Implementation details**:
+  - Add "Prepare Continuation" button after execution results
+  - Format previous task and results for continuation
+  - Add UI for editing continuation prompt before execution
+  - Implement agent targeting options for continuations
+  - Support for multi-step continuation chains
+
+### Continuation Workflow
+
+The continuation workflow now includes:
+
+1. **Preparation**: Format previous context into a continuation prompt
+2. **Editing**: User can modify the continuation prompt to add context, questions, directives
+3. **Targeting**: User can select which agent(s) should handle the continuation
+4. **Execution**: The continuation is processed through the normal execution pathways
+
+This workflow supports:
+- Branching (starting with manager, continuing with specialists)
+- Converging (starting with specialists, continuing with manager)
+- Chaining (multiple sequential continuations)
+- Parallel tracks (using @agent_name directives)
+
+### Memory Preservation
+
+The continuation feature preserves context through:
+1. Formatting previous task and results in the prompt
+2. Retaining agent memory across tasks
+3. Maintaining shared memory context in the agent group
+
+This ensures coherence across multiple steps in a complex reasoning process.
+
+### Future Enhancements
+
+Potential future improvements to the continuation feature:
+- Visual mapping of continuation chains
+- Ability to fork continuations from any previous result
+- Ability to merge multiple continuation branches
+- Integration with the planned execution history feature
+
 ## Implementation Roadmap
 
 ### Phase 1: Core UI Improvements

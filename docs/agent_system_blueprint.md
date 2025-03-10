@@ -274,7 +274,7 @@ This enables more precise control over which agents handle specific parts of a t
 
 ## 5. Memory Systems
 
-### 5.1 Individual Memory
+### 5.1 Individual Agent Memory
 
 Each agent maintains a personal memory store with entries containing:
 
@@ -282,7 +282,7 @@ Each agent maintains a personal memory store with entries containing:
 - **source**: Origin of the memory (task, observation, execution, etc.)
 - **timestamp**: When the memory was created
 
-Individual memory is used to provide context for future tasks assigned to the specific agent.
+Individual memory is used to provide context for future tasks assigned to the specific agent. This is a short-term conversational context that helps the agent maintain coherence within a session or conversation thread.
 
 ### 5.2 Shared Memory
 
@@ -292,9 +292,23 @@ Agent groups maintain a shared memory store with similar structure:
 - **source**: Origin of the memory (often "manager" or "group")
 - **timestamp**: When the memory was created
 
-Shared memory is accessible to all agents in the group and provides group-level context.
+Shared memory is accessible to all agents in the group and provides group-level context for collaborative tasks.
 
-### 5.3 Memory Integration
+### 5.3 Execution History
+
+Distinct from memory, execution history is a persistent record of all tasks executed by an agent group:
+
+- **id**: Unique identifier for the execution
+- **timestamp**: When the execution occurred
+- **task**: The original task prompt
+- **execution_type**: How the task was executed (manager, single agent, directive-based)
+- **agents_involved**: Which agents participated in the execution
+- **results**: The outcomes and responses from agents
+- **metadata**: Additional information about the execution
+
+While agent memory provides context for the agent's reasoning, execution history provides a user-accessible record of past interactions with the agent system that persists across sessions.
+
+### 5.4 Memory Integration
 
 Memory is incorporated into prompts as contextual information:
 
@@ -420,6 +434,7 @@ Provides controls for:
 - Exiting continuation mode
 - Viewing targeting help text
 - Displaying targeting status indicators
+- Editing continuation prompts before execution
 
 The continuation interface presents the user with:
 - Previous task context and results
@@ -427,6 +442,30 @@ The continuation interface presents the user with:
 - Agent targeting options based on previous execution
 - Help text explaining @agent_name syntax
 - Current targeting status feedback
+- Text area for editing the continuation prompt
+
+### 8.5.1 Multi-step Continuation Workflow
+
+The continuation system supports sequential continuation steps:
+
+1. **Initial Execution**: A task is executed with either the manager or specific agent(s)
+2. **Preparation Phase**: User clicks "Prepare Continuation" to format previous context
+3. **Editing Phase**: User can modify the continuation prompt and add directives
+4. **Targeting Phase**: User selects specific agent(s) for the continuation
+5. **Execution Phase**: User executes the continuation
+
+This workflow can be repeated multiple times, creating chains of continuations that build upon previous results.
+
+### 8.5.2 Directed Continuation Patterns
+
+The system supports various continuation patterns:
+
+- **Linear Continuation**: Sequential continuations with the same agent(s)
+- **Branching to Specialists**: Starting with manager coordination, then continuing with specialists
+- **Converging to Synthesis**: Starting with individual specialists, then continuing with manager
+- **Parallel Tracks**: Using @agent_name directives to maintain parallel conversation threads
+
+This flexibility allows for complex multi-agent workflows without losing context between steps.
 
 ## 9. Execution Workflow
 
@@ -485,6 +524,19 @@ The system determines the execution pathway based on:
 3. **Default mode**: Falls back to manager coordination if no targeting
 
 This decision flow enables fluid transitions between different execution modes based on the task's needs and user's intent, without requiring explicit mode selection.
+
+### 9.5 Continuation Execution
+
+The continuation workflow builds upon previous executions:
+
+1. **Context Preservation**: Previous task and results are formatted into a continuation prompt
+2. **Prompt Customization**: User can edit the continuation prompt before execution
+3. **Target Selection**: User can select specific agent(s) for the continuation
+4. **Memory Integration**: Context from previous executions is available in agent memory
+5. **Execution**: The continuation is processed through the selected execution pathway
+6. **Result Integration**: Results are stored for potential further continuations
+
+This allows for multi-step workflows that maintain context across multiple interactions, enabling complex reasoning chains that can shift between agents as needed.
 
 ## 10. Extension Points
 
