@@ -173,3 +173,4 @@ cython_debug/
 app/data/chats/*
 app/data/logs/*
 app/data/cache/*
+app/data/**/*

@@ -18,6 +18,8 @@ from ollama import chat
 import requests
 import streamlit as st
 
+from ..utils import tool_loader
+
 from ..utils.logger import get_logger, exception_handler, ErrorHandler
 
 
@@ -362,9 +364,14 @@ class OllamaAPI:
         model: str,
         messages: List[Dict[str, Union[str, List[Any]]]],
         system: Optional[str] = None,
-        temperature: float = 0.7,
+        temperature: float = 0.6,
+        repeat_penalty: float = 0.5,
+        top_k: int = 40,
+        top_p: float = 0.95,
         stream: bool = True,
         tools: Any = None,
+        available_functions: Optional[Dict[str, Any]] = None,
+        format: Optional[Dict[str, Any]] = None,
     ) -> Union[ollama.ChatResponse, Iterator[str]]:
         """
         Generate a chat completion using Ollama
@@ -376,6 +383,7 @@ class OllamaAPI:
             temperature: Temperature for generation (0.0 to 1.0)
             stream: Whether to stream the response (ignored if tools are used)
             tools: Optional list of tools to provide to the model - can be function references or tool definitions
+            format: Optional JSON Schema object to format the model response
 
         Returns:
             Either a complete response object, a generator of response chunks, or a string iterator for streaming
@@ -383,6 +391,33 @@ class OllamaAPI:
 
         # If tools are provided, we can't use streaming as we need to process tool calls
         if tools:
+            formatted_strings = []
+            functions_keys = available_functions.keys() if available_functions else []
+
+            for function_name in functions_keys:
+                formatted_strings.append(
+                    f'<tool_call>\n{{"name": "{function_name}"}}\n</tool_call>'
+                )
+
+            final_string = "\n\n".join(formatted_strings)
+
+            content = f"""You are a helpful AI assistant with access to previous conversation contexts and various tools.
+Your responses should be informative, engaging, and tailored to the user's needs.
+Carefully review the information from the provided contexts in your responses.
+The contexts are sorted by relevance, with the most relevant context listed first but take into account all previous context.
+Always prefer information from these contexts over making assumptions or using general knowledge. DO NOT use a tool unless the user asks you to do so.
+
+You may call one or more functions to assist with the user query. Don't make assumptions about what values to plug into functions.
+For each function call return a json object with function name and arguments within <tool_call></tool_call> XML tags as follows:
+<tool_call>
+{{"name": <function-name>,"arguments": <args-dict>}}
+</tool_call>
+
+Here are the available tools:
+{final_string}
+"""
+
+            messages.insert(0, {"role": "system", "content": content})
             processed_messages = [
                 {
                     "role": msg["role"],
@@ -398,6 +433,7 @@ class OllamaAPI:
                 model=model,
                 messages=processed_messages,
                 tools=tools,
+                format=format,  # Pass the format parameter to the chat function
             )
             return response
         else:
@@ -427,7 +463,7 @@ class OllamaAPI:
 
                 Remember to maintain context from previous interactions in the conversation.
 
-                Most Important: Always wrap source code in markdown, no exceptions!
+                If a JSON format has been provided. Ensure it is always followed.
                 """
                 messages_with_system.insert(0, {"role": "system", "content": content})
 
@@ -450,19 +486,23 @@ class OllamaAPI:
             # Handle streaming vs non-streaming
             if stream:
                 return OllamaAPI.stream_chat_completion(
-                    model, processed_messages, options
+                    model, processed_messages, options, format
                 )
             else:
                 response = chat(
                     model=model,
                     messages=processed_messages,
                     options=options,
+                    format=format,  # Pass the format parameter to the chat function
                 )
                 return response
 
     @staticmethod
     def stream_chat_completion(
-        model: str, messages: List[Dict[str, str]], options: Dict[str, Any]
+        model: str,
+        messages: List[Dict[str, str]],
+        options: Dict[str, Any],
+        format: Optional[Dict[str, Any]] = None,
     ) -> Iterator[str]:
         """
         Stream chat completion from Ollama
@@ -471,6 +511,7 @@ class OllamaAPI:
             model: The model to use for chat
             messages: Processed messages list
             options: Generation options
+            format: Optional JSON Schema object to format the model response
 
         Returns:
             Iterator that yields text chunks as they are generated
@@ -486,6 +527,7 @@ class OllamaAPI:
                     messages=messages,
                     options=options,
                     stream=True,
+                    format=format,  # Pass the format parameter to the chat function
                 ):
                     # Handle different response formats and ensure we always yield strings
                     if hasattr(chunk, "message") and hasattr(chunk.message, "content"):

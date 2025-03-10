@@ -1,0 +1,25 @@
+{
+  "type": "function",
+  "function": {
+    "name": "file_edit_tool",
+    "description": "Replaces a string in a file with another string",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "file_path": {
+          "type": "string",
+          "description": "The absolute path to the file to modify"
+        },
+        "old_string": {
+          "type": "string",
+          "description": "The string to replace"
+        },
+        "new_string": {
+          "type": "string",
+          "description": "The string to replace it with"
+        }
+      },
+      "required": ["file_path", "old_string", "new_string"]
+    }
+  }
+}

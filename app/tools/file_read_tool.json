@@ -1,0 +1,27 @@
+{
+  "type": "function",
+  "function": {
+    "name": "file_read_tool",
+    "description": "Reads a file from the local filesystem with optional offset and limit",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "file_path": {
+          "type": "string",
+          "description": "The absolute path to the file to read"
+        },
+        "offset": {
+          "type": "integer",
+          "description": "The line number to start reading from (1-indexed)",
+          "default": 1
+        },
+        "limit": {
+          "type": "integer",
+          "description": "The number of lines to read",
+          "default": null
+        }
+      },
+      "required": ["file_path"]
+    }
+  }
+}

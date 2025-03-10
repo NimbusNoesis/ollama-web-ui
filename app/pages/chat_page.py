@@ -317,6 +317,7 @@ class ChatPage:
                         temperature=temperature,
                         stream=False,
                         tools=valid_tools,
+                        available_functions=available_functions,
                     )
                 except Exception as e:
                     # If tools caused an error, try again without tools
