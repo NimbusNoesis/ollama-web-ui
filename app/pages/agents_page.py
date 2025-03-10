@@ -6,7 +6,6 @@ from app.utils.logger import get_logger, log_exception, set_log_level
 from app.utils.agents.ui_components import (
     render_agent_editor,
     render_group_editor,
-    render_group_view,
     render_task_executor,
     load_agents,
 )

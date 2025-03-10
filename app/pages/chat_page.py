@@ -485,7 +485,7 @@ class ChatPage:
                     # Try to convert to list if possible
                     try:
                         tool_calls_list = list(tool_calls)
-                    except:
+                    except Exception:
                         # If conversion fails, use empty list
                         tool_calls_list = []
 

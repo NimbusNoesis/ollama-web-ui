@@ -4,7 +4,7 @@ import sys
 import traceback
 from datetime import datetime
 from functools import wraps
-from typing import Any, Callable, Dict, Optional, Type, TypeVar, cast
+from typing import Any, Callable, Dict, TypeVar, cast
 
 # Type variable for the decorator
 F = TypeVar("F", bound=Callable[..., Any])

@@ -18,7 +18,7 @@ from ollama import chat
 import requests
 import streamlit as st
 
-from ..utils import tool_loader
+# from ..utils import tool_loader
 
 from ..utils.logger import get_logger, exception_handler, ErrorHandler
 
@@ -546,7 +546,7 @@ Here are the available tools:
                         # Unexpected chunk format, convert to string if possible
                         try:
                             yield str(chunk)
-                        except:
+                        except Exception:
                             # If we can't convert it to a string, yield nothing
                             pass
             except Exception as e:

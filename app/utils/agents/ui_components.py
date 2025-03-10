@@ -42,7 +42,7 @@ def parse_agent_directives(task: str, available_agents: List[Agent]) -> Dict[str
     directives = {}
 
     # Use regex pattern that matches @name: followed by text until the next @name: or end of string
-    pattern = r'@([^:]+):(.*?)(?=@[^:]+:|$)'
+    pattern = r"@([^:]+):(.*?)(?=@[^:]+:|$)"
     matches = re.findall(pattern, task, re.DOTALL)
 
     for agent_name, subtask in matches:
@@ -53,9 +53,13 @@ def parse_agent_directives(task: str, available_agents: List[Agent]) -> Dict[str
         for available_name in agent_names:
             if agent_name == available_name.lower():
                 # Use the correctly cased agent name
-                correct_name = next(a.name for a in available_agents if a.name.lower() == agent_name)
+                correct_name = next(
+                    a.name for a in available_agents if a.name.lower() == agent_name
+                )
                 directives[correct_name] = subtask
-                logger.info(f"Found directive for agent {correct_name}: {subtask[:30]}...")
+                logger.info(
+                    f"Found directive for agent {correct_name}: {subtask[:30]}..."
+                )
                 break
         else:
             logger.warning(f"Directive for unknown agent '{agent_name}' found in task")
@@ -278,7 +282,9 @@ def render_group_view(group: AgentGroup):
             if agent.tools:
                 st.markdown("**Tools**:")
                 for tool in agent.tools:
-                    st.markdown(f"- {tool['function']['name']}: {tool['function']['description']}")
+                    st.markdown(
+                        f"- {tool['function']['name']}: {tool['function']['description']}"
+                    )
 
             # Buttons for agent actions
             col1, col2 = st.columns(2)
@@ -288,7 +294,9 @@ def render_group_view(group: AgentGroup):
                     st.session_state.editing_agent_original_group = group
             with col2:
                 if st.button("Delete Agent", key=f"delete_{agent.id}"):
-                    confirm_delete = st.checkbox("Confirm deletion", key=f"confirm_{agent.id}")
+                    confirm_delete = st.checkbox(
+                        "Confirm deletion", key=f"confirm_{agent.id}"
+                    )
                     if confirm_delete:
                         group.agents = [a for a in group.agents if a.id != agent.id]
                         save_agents()
@@ -301,7 +309,7 @@ def render_group_view(group: AgentGroup):
         with st.expander("View Shared Memory"):
             for memory in group.shared_memory[-10:]:
                 st.markdown(f"**{memory['source']}** ({memory['timestamp']})")
-                st.markdown(memory['content'])
+                st.markdown(memory["content"])
                 st.markdown("---")
 
     # Add group actions
@@ -349,7 +357,7 @@ def render_task_executor(group: AgentGroup):
         "Enter task for agents",
         value=st.session_state.get("current_task", ""),
         height=150,
-        help="Enter a natural language task for the agent group. You can use @AgentName: syntax to direct parts of the task to specific agents."
+        help="Enter a natural language task for the agent group. You can use @AgentName: syntax to direct parts of the task to specific agents.",
     )
 
     # If we're in continuation mode, show the editable continuation prompt
@@ -365,7 +373,9 @@ def render_task_executor(group: AgentGroup):
 
         if directives:
             # Display the detected directives
-            st.success(f"Detected directives for {len(directives)} agents: {', '.join(directives.keys())}")
+            st.success(
+                f"Detected directives for {len(directives)} agents: {', '.join(directives.keys())}"
+            )
             agent_targeting = "directive"
         else:
             # If no directives, show targeting options
@@ -380,14 +390,16 @@ def render_task_executor(group: AgentGroup):
             # Pre-select the agent that was used in the previous execution if available
             default_index = 0
             if "target_agent" in st.session_state and st.session_state.target_agent:
-                if st.session_state.target_agent in [agent.name for agent in group.agents]:
+                if st.session_state.target_agent in [
+                    agent.name for agent in group.agents
+                ]:
                     default_index = target_options.index(st.session_state.target_agent)
 
             target = st.selectbox(
                 "Direct this continuation to:",
                 options=target_options,
                 index=default_index,
-                help="Select which agent(s) should handle this continuation. Choose 'Select Multiple Agents' to target a subset."
+                help="Select which agent(s) should handle this continuation. Choose 'Select Multiple Agents' to target a subset.",
             )
 
             # If "Select Multiple Agents" is chosen, show multiselect
@@ -397,7 +409,7 @@ def render_task_executor(group: AgentGroup):
                     "Select agents to include:",
                     options=agent_names,
                     default=st.session_state.get("selected_agents", []),
-                    help="Choose which agents should process this task."
+                    help="Choose which agents should process this task.",
                 )
 
                 # Store selected agents in session state
@@ -430,7 +442,7 @@ def render_task_executor(group: AgentGroup):
         track_chain = st.checkbox(
             "Track continuation chain",
             value=True,
-            help="Adds metadata to link this continuation with its parent execution"
+            help="Adds metadata to link this continuation with its parent execution",
         )
 
         # Help section for agent targeting
@@ -456,7 +468,9 @@ def render_task_executor(group: AgentGroup):
         with cont_col1:
             execute_button = st.button("▶️ Execute Continuation", type="primary")
         with cont_col2:
-            st.markdown(f"**Targeting:** {'Multiple Agents via Directives' if agent_targeting == 'directive' else ('Manager Coordination' if agent_targeting == 'manager' else f'Specific Agent ({st.session_state.target_agent})')}")
+            st.markdown(
+                f"**Targeting:** {'Multiple Agents via Directives' if agent_targeting == 'directive' else ('Manager Coordination' if agent_targeting == 'manager' else f'Specific Agent ({st.session_state.target_agent})')}"
+            )
 
     # Normal execution mode (not continuation)
     else:
@@ -470,7 +484,9 @@ def render_task_executor(group: AgentGroup):
 
         if directives:
             # Display the detected directives
-            st.success(f"Detected directives for {len(directives)} agents: {', '.join(directives.keys())}")
+            st.success(
+                f"Detected directives for {len(directives)} agents: {', '.join(directives.keys())}"
+            )
             st.write("Executing with detected agent directives...")
 
             with st.spinner("Processing..."):
@@ -484,7 +500,7 @@ def render_task_executor(group: AgentGroup):
                 "result": result,
                 "directives": directives,
                 "timestamp": datetime.now().isoformat(),
-                "history_id": history_id
+                "history_id": history_id,
             }
 
             # Display results
@@ -492,7 +508,13 @@ def render_task_executor(group: AgentGroup):
 
         else:
             # Use tabs for execution options
-            exec_tab1, exec_tab2, exec_tab3 = st.tabs(["Execute with Manager", "Execute with Specific Agent", "Execute with Multiple Agents"])
+            exec_tab1, exec_tab2, exec_tab3 = st.tabs(
+                [
+                    "Execute with Manager",
+                    "Execute with Specific Agent",
+                    "Execute with Multiple Agents",
+                ]
+            )
 
             with exec_tab1:
                 # Manager execution button
@@ -507,7 +529,7 @@ def render_task_executor(group: AgentGroup):
                             "task": task,
                             "result": result,
                             "timestamp": datetime.now().isoformat(),
-                            "history_id": history_id
+                            "history_id": history_id,
                         }
 
                         # Display results
@@ -518,7 +540,7 @@ def render_task_executor(group: AgentGroup):
                 agent_name = st.selectbox(
                     "Select agent",
                     options=[agent.name for agent in group.agents],
-                    help="Choose which agent to execute this task"
+                    help="Choose which agent to execute this task",
                 )
 
                 # Specific agent execution button
@@ -534,7 +556,7 @@ def render_task_executor(group: AgentGroup):
                         "result": result,
                         "agent_name": agent_name,
                         "timestamp": datetime.now().isoformat(),
-                        "history_id": history_id
+                        "history_id": history_id,
                     }
 
                     # Display results
@@ -546,7 +568,7 @@ def render_task_executor(group: AgentGroup):
                 selected_agents = st.multiselect(
                     "Select agents to include:",
                     options=agent_names,
-                    help="Choose which agents should process this task."
+                    help="Choose which agents should process this task.",
                 )
 
                 # Multi-agent execution button
@@ -554,8 +576,12 @@ def render_task_executor(group: AgentGroup):
                     if not selected_agents:
                         st.warning("Please select at least one agent")
                     else:
-                        with st.spinner(f"Processing with {len(selected_agents)} agents..."):
-                            result = execute_with_multiple_agents(group, task, selected_agents)
+                        with st.spinner(
+                            f"Processing with {len(selected_agents)} agents..."
+                        ):
+                            result = execute_with_multiple_agents(
+                                group, task, selected_agents
+                            )
 
                         # Store in session state for continuation with history ID
                         history_id = result.get("history_id", str(uuid.uuid4()))
@@ -565,15 +591,20 @@ def render_task_executor(group: AgentGroup):
                             "result": result,
                             "agent_names": selected_agents,
                             "timestamp": datetime.now().isoformat(),
-                            "history_id": history_id
+                            "history_id": history_id,
                         }
 
                         # Display results
-                        display_directive_results(result, {agent_name: task for agent_name in selected_agents})
+                        display_directive_results(
+                            result, {agent_name: task for agent_name in selected_agents}
+                        )
 
     # Handle continuation execution
+    execute_button = False
+    agent_targeting = None  # Initialize agent_targeting
     if in_continuation_mode and execute_button:
         # Store whether to track the continuation chain
+        track_chain = st.session_state.get("track_chain", True)
         st.session_state.track_chain = track_chain
 
         with st.spinner("Processing continuation..."):
@@ -589,18 +620,24 @@ def render_task_executor(group: AgentGroup):
                     "result": result,
                     "directives": directives,
                     "timestamp": datetime.now().isoformat(),
-                    "history_id": history_id
+                    "history_id": history_id,
                 }
 
                 # Add parent/child relationship for continuation chains
-                if st.session_state.get("parent_execution_id") and st.session_state.get("track_chain", True):
-                    st.session_state.agent_execution_results["parent_id"] = st.session_state.parent_execution_id
+                if st.session_state.get("parent_execution_id") and st.session_state.get(
+                    "track_chain", True
+                ):
+                    st.session_state.agent_execution_results["parent_id"] = (
+                        st.session_state.parent_execution_id
+                    )
 
                 # Display results
                 display_directive_results(result, directives)
 
             # If targeting multiple agents
-            elif agent_targeting == "multi_agent" and st.session_state.get("selected_agents"):
+            elif agent_targeting == "multi_agent" and st.session_state.get(
+                "selected_agents"
+            ):
                 selected_agents = st.session_state.selected_agents
                 result = execute_with_multiple_agents(group, task, selected_agents)
 
@@ -612,15 +649,21 @@ def render_task_executor(group: AgentGroup):
                     "result": result,
                     "agent_names": selected_agents,
                     "timestamp": datetime.now().isoformat(),
-                    "history_id": history_id
+                    "history_id": history_id,
                 }
 
                 # Add parent/child relationship for continuation chains
-                if st.session_state.get("parent_execution_id") and st.session_state.get("track_chain", True):
-                    st.session_state.agent_execution_results["parent_id"] = st.session_state.parent_execution_id
+                if st.session_state.get("parent_execution_id") and st.session_state.get(
+                    "track_chain", True
+                ):
+                    st.session_state.agent_execution_results["parent_id"] = (
+                        st.session_state.parent_execution_id
+                    )
 
                 # Display results
-                display_directive_results(result, {agent_name: task for agent_name in selected_agents})
+                display_directive_results(
+                    result, {agent_name: task for agent_name in selected_agents}
+                )
 
             # If targeting a specific agent
             elif st.session_state.get("target_agent"):
@@ -635,12 +678,16 @@ def render_task_executor(group: AgentGroup):
                     "result": result,
                     "agent_name": agent_name,
                     "timestamp": datetime.now().isoformat(),
-                    "history_id": history_id
+                    "history_id": history_id,
                 }
 
                 # Add parent/child relationship for continuation chains
-                if st.session_state.get("parent_execution_id") and st.session_state.get("track_chain", True):
-                    st.session_state.agent_execution_results["parent_id"] = st.session_state.parent_execution_id
+                if st.session_state.get("parent_execution_id") and st.session_state.get(
+                    "track_chain", True
+                ):
+                    st.session_state.agent_execution_results["parent_id"] = (
+                        st.session_state.parent_execution_id
+                    )
 
                 # Display results
                 display_agent_results(result, agent_name, group)
@@ -656,12 +703,16 @@ def render_task_executor(group: AgentGroup):
                     "task": task,
                     "result": result,
                     "timestamp": datetime.now().isoformat(),
-                    "history_id": history_id
+                    "history_id": history_id,
                 }
 
                 # Add parent/child relationship for continuation chains
-                if st.session_state.get("parent_execution_id") and st.session_state.get("track_chain", True):
-                    st.session_state.agent_execution_results["parent_id"] = st.session_state.parent_execution_id
+                if st.session_state.get("parent_execution_id") and st.session_state.get(
+                    "track_chain", True
+                ):
+                    st.session_state.agent_execution_results["parent_id"] = (
+                        st.session_state.parent_execution_id
+                    )
 
                 # Display results
                 display_manager_results(result)
@@ -685,18 +736,27 @@ def render_task_executor(group: AgentGroup):
         if results_data["type"] == "manager":
             display_manager_results(results_data["result"])
         elif results_data["type"] == "single_agent":
-            display_agent_results(results_data["result"], results_data["agent_name"], group)
+            display_agent_results(
+                results_data["result"], results_data["agent_name"], group
+            )
         elif results_data["type"] == "directive":
-            display_directive_results(results_data["result"], results_data.get("directives", {}))
+            display_directive_results(
+                results_data["result"], results_data.get("directives", {})
+            )
         elif results_data["type"] == "multi_agent":
             display_directive_results(
                 results_data["result"],
-                {agent_name: results_data["task"] for agent_name in results_data.get("agent_names", [])}
+                {
+                    agent_name: results_data["task"]
+                    for agent_name in results_data.get("agent_names", [])
+                },
             )
 
         # Show continuation information if this was a continuation itself
         if "parent_id" in results_data:
-            st.info(f"This execution continues from a previous task (ID: {results_data['parent_id']})")
+            st.info(
+                f"This execution continues from a previous task (ID: {results_data['parent_id']})"
+            )
 
         # Show continuation button
         st.markdown("### Continue from these results")
@@ -704,7 +764,7 @@ def render_task_executor(group: AgentGroup):
             # Format previous task and results for continuation
             formatted_result = get_formatted_result(results_data)
 
-            continuation_prompt = f"""Previous task: {results_data['task']}
+            continuation_prompt = f"""Previous task: {results_data["task"]}
 
 Result:
 {formatted_result}
@@ -766,12 +826,16 @@ def display_manager_results(result: Dict[str, Any]):
 
         # Display thought process
         st.markdown("### Thought Process")
-        st.markdown(process_markdown(plan.get("thought_process", "No thought process provided")))
+        st.markdown(
+            process_markdown(plan.get("thought_process", "No thought process provided"))
+        )
 
         # Display steps
         st.markdown("### Execution Steps")
         for i, step in enumerate(plan.get("steps", [])):
-            with st.expander(f"Step {i+1}: {step.get('agent')} - {step.get('task')[:50]}..."):
+            with st.expander(
+                f"Step {i + 1}: {step.get('agent')} - {step.get('task')[:50]}..."
+            ):
                 st.markdown(f"**Agent**: {step.get('agent')}")
                 st.markdown(f"**Task**: {step.get('task')}")
                 st.markdown(f"**Reason**: {step.get('reason')}")
@@ -782,10 +846,14 @@ def display_manager_results(result: Dict[str, Any]):
             agent_name = agent_result.get("agent")
             agent_data = agent_result.get("result", {})
 
-            with st.expander(f"{agent_name} - {agent_data.get('response', '')[:50]}..."):
+            with st.expander(
+                f"{agent_name} - {agent_data.get('response', '')[:50]}..."
+            ):
                 # Display response
                 st.markdown("### Response")
-                st.markdown(process_markdown(agent_data.get("response", "No response provided")))
+                st.markdown(
+                    process_markdown(agent_data.get("response", "No response provided"))
+                )
 
                 # If available, show thought process
                 if "thought_process" in agent_data:
@@ -830,9 +898,7 @@ def display_agent_results(result: Dict[str, Any], agent_name: str, group: AgentG
             st.markdown("### Tools Used")
             for tool_call in result["tool_calls"]:
                 tool_name = tool_call["tool"]
-                tool_input = json.dumps(
-                    tool_call["input"], indent=2
-                )
+                tool_input = json.dumps(tool_call["input"], indent=2)
                 st.markdown(f"**Tool**: {tool_name}")
                 st.markdown(f"```json\n{tool_input}\n```")
 
@@ -841,15 +907,15 @@ def display_agent_results(result: Dict[str, Any], agent_name: str, group: AgentG
         # Find the agent to get its memory
         agent = next((a for a in group.agents if a.name == agent_name), None)
         if agent:
-                            recent_memories = agent.memory[-5:] if agent.memory else []
-                            for memory in recent_memories:
-                                timestamp = memory["timestamp"]
-                                source = memory["source"]
-                                content = memory["content"]
+            recent_memories = agent.memory[-5:] if agent.memory else []
+            for memory in recent_memories:
+                timestamp = memory["timestamp"]
+                source = memory["source"]
+                content = memory["content"]
 
-                                st.markdown(f"**{source}** ({timestamp})")
-                                st.markdown(process_markdown(content))
-                                st.markdown("---")
+                st.markdown(f"**{source}** ({timestamp})")
+                st.markdown(process_markdown(content))
+                st.markdown("---")
         else:
             st.info("No memory found for this agent")
 
@@ -888,10 +954,15 @@ def display_directive_results(result: Dict[str, Any], directives: Dict[str, str]
                 thought_process = agent_data.get("thought_process", "")
 
                 # Try to detect if response is a JSON string with thought_process and response
-                if isinstance(response, str) and response.strip().startswith("{") and response.strip().endswith("}"):
+                if (
+                    isinstance(response, str)
+                    and response.strip().startswith("{")
+                    and response.strip().endswith("}")
+                ):
                     try:
                         # Try to parse JSON response
                         import json
+
                         parsed_json = json.loads(response)
 
                         # Extract fields if they exist
@@ -900,9 +971,11 @@ def display_directive_results(result: Dict[str, Any], directives: Dict[str, str]
                                 response = parsed_json.get("response", "")
                             if "thought_process" in parsed_json and not thought_process:
                                 thought_process = parsed_json.get("thought_process", "")
-                    except:
+                    except Exception:
                         # If parsing fails, use the original response
-                        logger.warning(f"Failed to parse JSON response from agent {agent_name}")
+                        logger.warning(
+                            f"Failed to parse JSON response from agent {agent_name}"
+                        )
 
                 # Display response
                 st.markdown("#### Response")
@@ -1076,19 +1149,24 @@ def execute_with_agent(group: AgentGroup, agent_name: str, task: str) -> Dict[st
         # Find the agent by name
         agent = next((a for a in group.agents if a.name == agent_name), None)
         if not agent:
-            return {"status": "error", "message": f"Agent '{agent_name}' not found in group '{group.name}'"}
+            return {
+                "status": "error",
+                "message": f"Agent '{agent_name}' not found in group '{group.name}'",
+            }
 
         start_time = time.time()
         result = agent.execute_task(task)
         execution_time = time.time() - start_time
 
         # Add to agent memory
-        agent.add_to_memory(f"Task: {task}\nResponse: {result['response']}", "execution")
+        agent.add_to_memory(
+            f"Task: {task}\nResponse: {result['response']}", "execution"
+        )
 
         # Add to group shared memory
         group.add_shared_memory(
             f"Agent {agent_name} processed: {task}\nResult: {result['response']}",
-            source="agent_execution"
+            source="agent_execution",
         )
 
         # Record in history
@@ -1100,12 +1178,14 @@ def execute_with_agent(group: AgentGroup, agent_name: str, task: str) -> Dict[st
                 "status": "success",
                 "response": result.get("response", ""),
                 "thought_process": result.get("thought_process", ""),
-                "tool_calls": result.get("tool_calls", [])
+                "tool_calls": result.get("tool_calls", []),
             },
-            "execution_time": execution_time
+            "execution_time": execution_time,
         }
         history_id = group.add_to_history(history_entry)
-        logger.info(f"Added execution to history with ID: {history_id}, current history size: {len(group.execution_history)}")
+        logger.info(
+            f"Added execution to history with ID: {history_id}, current history size: {len(group.execution_history)}"
+        )
 
         # Save changes to disk
         save_agents()
@@ -1118,7 +1198,9 @@ def execute_with_agent(group: AgentGroup, agent_name: str, task: str) -> Dict[st
         return {"status": "error", "message": str(e)}
 
 
-def execute_task_with_directives(group: AgentGroup, task: str, directives: Dict[str, str]) -> Dict:
+def execute_task_with_directives(
+    group: AgentGroup, task: str, directives: Dict[str, str]
+) -> Dict:
     """Execute a task with agent directives."""
     combined_results = []
     agents_involved = []
@@ -1128,30 +1210,31 @@ def execute_task_with_directives(group: AgentGroup, task: str, directives: Dict[
         logger.info(f"Executing directive for agent {agent_name}: {subtask}")
         agent = next((a for a in group.agents if a.name == agent_name), None)
         if not agent:
-            combined_results.append({
-                "agent": agent_name,
-                "result": {
-                    "status": "error",
-                    "message": f"Agent '{agent_name}' not found in group '{group.name}'"
+            combined_results.append(
+                {
+                    "agent": agent_name,
+                    "result": {
+                        "status": "error",
+                        "message": f"Agent '{agent_name}' not found in group '{group.name}'",
+                    },
                 }
-            })
+            )
             continue
 
         result = agent.execute_task(subtask)
 
         # Add to agent memory
-        agent.add_to_memory(f"Task: {subtask}\nResponse: {result['response']}", "execution")
+        agent.add_to_memory(
+            f"Task: {subtask}\nResponse: {result['response']}", "execution"
+        )
 
         # Add to group shared memory
         group.add_shared_memory(
             f"Agent {agent_name} processed: {subtask}\nResult: {result['response']}",
-            source="agent_directive"
+            source="agent_directive",
         )
 
-        combined_results.append({
-            "agent": agent_name,
-            "result": result
-        })
+        combined_results.append({"agent": agent_name, "result": result})
 
         agents_involved.append(agent_name)
 
@@ -1161,7 +1244,9 @@ def execute_task_with_directives(group: AgentGroup, task: str, directives: Dict[
         agent_name = result["agent"]
         agent_result = result["result"]
         if agent_result["status"] == "error":
-            combined_response += f"## {agent_name}\n\n❌ Error: {agent_result['message']}\n\n"
+            combined_response += (
+                f"## {agent_name}\n\n❌ Error: {agent_result['message']}\n\n"
+            )
         else:
             combined_response += f"## {agent_name}\n\n{agent_result['response']}\n\n"
 
@@ -1176,12 +1261,14 @@ def execute_task_with_directives(group: AgentGroup, task: str, directives: Dict[
         "result": {
             "status": "success",
             "response": combined_response,
-            "agent_results": combined_results
+            "agent_results": combined_results,
         },
-        "execution_time": execution_time
+        "execution_time": execution_time,
     }
     history_id = group.add_to_history(history_entry)
-    logger.info(f"Added directive execution to history with ID: {history_id}, current history size: {len(group.execution_history)}")
+    logger.info(
+        f"Added directive execution to history with ID: {history_id}, current history size: {len(group.execution_history)}"
+    )
 
     # Save changes to disk
     save_agents()
@@ -1193,7 +1280,7 @@ def execute_task_with_directives(group: AgentGroup, task: str, directives: Dict[
         "directives": directives,
         "individual_results": combined_results,
         "execution_time": execution_time,
-        "history_id": history_id
+        "history_id": history_id,
     }
 
 
@@ -1204,14 +1291,22 @@ def render_execution_history(group: AgentGroup):
         return
 
     # Add debug info
-    logger.info(f"Rendering execution history for group {group.name}, found {len(group.execution_history)} entries")
+    logger.info(
+        f"Rendering execution history for group {group.name}, found {len(group.execution_history)} entries"
+    )
 
     st.subheader("Execution History")
 
     # Add filters
     col1, col2, col3 = st.columns(3)
     with col1:
-        execution_types = ["All Types", "Manager", "Single Agent", "Directive", "Multi-Agent"]
+        execution_types = [
+            "All Types",
+            "Manager",
+            "Single Agent",
+            "Directive",
+            "Multi-Agent",
+        ]
         selected_type = st.selectbox("Filter by type:", execution_types)
 
     with col2:
@@ -1233,27 +1328,31 @@ def render_execution_history(group: AgentGroup):
             "Manager": "manager_execution",
             "Single Agent": "single_agent_execution",
             "Directive": "directive_execution",
-            "Multi-Agent": "multi_agent_execution"
+            "Multi-Agent": "multi_agent_execution",
         }
         filter_type = type_map.get(selected_type)
         if filter_type:
-            filtered_history = [entry for entry in filtered_history if entry.get("type") == filter_type]
+            filtered_history = [
+                entry for entry in filtered_history if entry.get("type") == filter_type
+            ]
 
     # Apply agent filter
     if selected_agent != "All Agents":
         filtered_history = [
-            entry for entry in filtered_history
+            entry
+            for entry in filtered_history
             if selected_agent in entry.get("agents_involved", [])
         ]
 
     # Apply sorting
     filtered_history.sort(
-        key=lambda x: x.get("timestamp", ""),
-        reverse=(sort_order == "Newest First")
+        key=lambda x: x.get("timestamp", ""), reverse=(sort_order == "Newest First")
     )
 
     # Show history count
-    st.markdown(f"**Showing {len(filtered_history)} of {len(group.execution_history)} history entries**")
+    st.markdown(
+        f"**Showing {len(filtered_history)} of {len(group.execution_history)} history entries**"
+    )
 
     # Display history entries
     for i, entry in enumerate(filtered_history):
@@ -1265,13 +1364,15 @@ def render_execution_history(group: AgentGroup):
 
         # Get parent/child relationships
         parent_id = entry.get("parent_id", None)
-        children = [e for e in group.execution_history if e.get("parent_id") == entry_id]
+        children = [
+            e for e in group.execution_history if e.get("parent_id") == entry_id
+        ]
 
         # Format the timestamp to be more readable
         try:
             dt = datetime.fromisoformat(timestamp)
             formatted_time = dt.strftime("%Y-%m-%d %H:%M:%S")
-        except:
+        except Exception:
             formatted_time = timestamp
 
         # Create a unique key for the expander
@@ -1300,7 +1401,7 @@ def render_execution_history(group: AgentGroup):
 
             if children:
                 child_ids = [child.get("id") for child in children]
-                st.markdown(f"**Continued by**: {', '.join(child_ids)}")
+                st.markdown(f"**Continued by**: {', '.join(filter(None, child_ids))}")
 
             # Display the result based on execution type
             result = entry.get("result", {})
@@ -1374,12 +1475,16 @@ def render_execution_history(group: AgentGroup):
 
             # Add execution time if available
             if "execution_time" in entry:
-                st.markdown(f"**Execution Time**: {entry['execution_time']:.2f} seconds")
+                st.markdown(
+                    f"**Execution Time**: {entry['execution_time']:.2f} seconds"
+                )
 
             # Add buttons for continuation
             col1, col2 = st.columns(2)
             with col1:
-                if st.button("Prepare Continuation from This", key=f"cont_{expander_key}"):
+                if st.button(
+                    "Prepare Continuation from This", key=f"cont_{expander_key}"
+                ):
                     prepare_continuation_from_history(entry)
 
             with col2:
@@ -1393,15 +1498,19 @@ def render_execution_history(group: AgentGroup):
                         is_current = chain_entry.get("id") == entry_id
                         prefix = "➡️ " if is_current else "   "
                         chain_id = chain_entry.get("id", "Unknown")
-                        chain_type = chain_entry.get("type", "Unknown").replace("_", " ").title()
+                        chain_type = (
+                            chain_entry.get("type", "Unknown").replace("_", " ").title()
+                        )
                         chain_time = chain_entry.get("timestamp", "")
                         try:
                             chain_dt = datetime.fromisoformat(chain_time)
                             chain_time = chain_dt.strftime("%Y-%m-%d %H:%M:%S")
-                        except:
+                        except Exception:
                             pass
 
-                        st.markdown(f"{prefix} **{chain_id}** - {chain_type} - {chain_time}")
+                        st.markdown(
+                            f"{prefix} **{chain_id}** - {chain_type} - {chain_time}"
+                        )
 
 
 def get_continuation_chain(group: AgentGroup, entry_id: str) -> List[Dict[str, Any]]:
@@ -1419,7 +1528,9 @@ def get_continuation_chain(group: AgentGroup, entry_id: str) -> List[Dict[str, A
     # Recursively add parents
     parent_id = entry.get("parent_id")
     if parent_id:
-        parent_entry = next((e for e in group.execution_history if e.get("id") == parent_id), None)
+        parent_entry = next(
+            (e for e in group.execution_history if e.get("id") == parent_id), None
+        )
         if parent_entry:
             parent_chain = get_continuation_chain(group, parent_id)
             # Add parents at the start
@@ -1429,12 +1540,15 @@ def get_continuation_chain(group: AgentGroup, entry_id: str) -> List[Dict[str, A
 
     # Add children
     children = [e for e in group.execution_history if e.get("parent_id") == entry_id]
+    child_chain = []
     for child in children:
-        child_chain = get_continuation_chain(group, child.get("id"))
-        # Add children at the end
-        for child_entry in child_chain:
-            if child_entry not in chain:
-                chain.append(child_entry)
+        child_id = child.get("id")
+        if child_id:
+            child_chain = get_continuation_chain(group, child_id)
+    # Add children at the end
+    for child_entry in child_chain:
+        if child_entry not in chain:
+            chain.append(child_entry)
 
     return chain
 
@@ -1493,7 +1607,9 @@ Continue from here:
     st.rerun()
 
 
-def execute_with_multiple_agents(group: AgentGroup, task: str, agent_names: List[str]) -> Dict[str, Any]:
+def execute_with_multiple_agents(
+    group: AgentGroup, task: str, agent_names: List[str]
+) -> Dict[str, Any]:
     """Execute a task with multiple specific agents."""
     if not agent_names:
         return {"status": "error", "message": "No agents selected for execution"}
@@ -1507,31 +1623,32 @@ def execute_with_multiple_agents(group: AgentGroup, task: str, agent_names: List
         # Find the agent by name
         agent = next((a for a in group.agents if a.name == agent_name), None)
         if not agent:
-            combined_results.append({
-                "agent": agent_name,
-                "result": {
-                    "status": "error",
-                    "message": f"Agent '{agent_name}' not found in group '{group.name}'"
+            combined_results.append(
+                {
+                    "agent": agent_name,
+                    "result": {
+                        "status": "error",
+                        "message": f"Agent '{agent_name}' not found in group '{group.name}'",
+                    },
                 }
-            })
+            )
             continue
 
         # Execute with this agent
         agent_result = agent.execute_task(task)
 
         # Add to agent memory
-        agent.add_to_memory(f"Task: {task}\nResponse: {agent_result['response']}", "execution")
+        agent.add_to_memory(
+            f"Task: {task}\nResponse: {agent_result['response']}", "execution"
+        )
 
         # Add to group shared memory
         group.add_shared_memory(
             f"Agent {agent_name} processed: {task}\nResult: {agent_result['response']}",
-            source="multi_agent_execution"
+            source="multi_agent_execution",
         )
 
-        combined_results.append({
-            "agent": agent_name,
-            "result": agent_result
-        })
+        combined_results.append({"agent": agent_name, "result": agent_result})
 
     # Combine responses into a single response
     combined_response = "# Agent Responses\n\n"
@@ -1539,24 +1656,33 @@ def execute_with_multiple_agents(group: AgentGroup, task: str, agent_names: List
         agent_name = result["agent"]
         agent_result = result["result"]
         if agent_result["status"] == "error":
-            combined_response += f"## {agent_name}\n\n❌ Error: {agent_result['message']}\n\n"
+            combined_response += (
+                f"## {agent_name}\n\n❌ Error: {agent_result['message']}\n\n"
+            )
         else:
             # Process the response (handle JSON format if needed)
             response = agent_result.get("response", "No response provided")
 
             # Try to detect if response is a JSON string with thought_process and response
-            if isinstance(response, str) and response.strip().startswith("{") and response.strip().endswith("}"):
+            if (
+                isinstance(response, str)
+                and response.strip().startswith("{")
+                and response.strip().endswith("}")
+            ):
                 try:
                     # Try to parse JSON response
                     import json
+
                     parsed_json = json.loads(response)
 
                     # Extract response if it exists
                     if isinstance(parsed_json, dict) and "response" in parsed_json:
                         response = parsed_json.get("response", "")
-                except:
+                except Exception:
                     # If parsing fails, use the original response
-                    logger.warning(f"Failed to parse JSON response from agent {agent_name}")
+                    logger.warning(
+                        f"Failed to parse JSON response from agent {agent_name}"
+                    )
 
             combined_response += f"## {agent_name}\n\n{response}\n\n"
 
@@ -1570,17 +1696,21 @@ def execute_with_multiple_agents(group: AgentGroup, task: str, agent_names: List
         "result": {
             "status": "success",
             "response": combined_response,
-            "agent_results": combined_results
+            "agent_results": combined_results,
         },
-        "execution_time": execution_time
+        "execution_time": execution_time,
     }
 
     # Add parent/child relationship for continuation chains
-    if st.session_state.get("parent_execution_id") and st.session_state.get("track_chain", True):
+    if st.session_state.get("parent_execution_id") and st.session_state.get(
+        "track_chain", True
+    ):
         history_entry["parent_id"] = st.session_state.parent_execution_id
 
     history_id = group.add_to_history(history_entry)
-    logger.info(f"Added multi-agent execution to history with ID: {history_id}, current history size: {len(group.execution_history)}")
+    logger.info(
+        f"Added multi-agent execution to history with ID: {history_id}, current history size: {len(group.execution_history)}"
+    )
 
     # Save changes to disk
     save_agents()
@@ -1591,5 +1721,5 @@ def execute_with_multiple_agents(group: AgentGroup, task: str, agent_names: List
         "response": combined_response,
         "individual_results": combined_results,
         "execution_time": execution_time,
-        "history_id": history_id
+        "history_id": history_id,
     }

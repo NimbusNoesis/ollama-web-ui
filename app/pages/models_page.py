@@ -1,7 +1,6 @@
 import time
 import os
 import json
-import copy
 from datetime import datetime, timedelta
 from typing import Any, Dict, List
 
@@ -391,30 +390,34 @@ class ModelsPage:
         st.write(f"**Model:** {model_data['name']}")
         st.write(f"**Tags:** {model_data['tags']}")
 
-        if 'variants' in model_data and model_data['variants']:
+        if "variants" in model_data and model_data["variants"]:
             st.write("### Select a Variant to Download")
 
             # Create a table for better variant comparison
             variant_data = []
-            for variant in model_data['variants']:
-                variant_data.append({
-                    "Variant": variant.get('display_name', variant.get('tag', 'Unknown')),
-                    "Tag": variant.get('tag', 'Unknown'),
-                    "Size": variant.get('size', 'Unknown'),
-                    "Last Updated": variant.get('last_updated', 'Unknown'),
-                    "Hash": variant.get('hash', 'Unknown')
-                })
+            for variant in model_data["variants"]:
+                variant_data.append(
+                    {
+                        "Variant": variant.get(
+                            "display_name", variant.get("tag", "Unknown")
+                        ),
+                        "Tag": variant.get("tag", "Unknown"),
+                        "Size": variant.get("size", "Unknown"),
+                        "Last Updated": variant.get("last_updated", "Unknown"),
+                        "Hash": variant.get("hash", "Unknown"),
+                    }
+                )
 
             # Display as a table
             df = pd.DataFrame(variant_data)
             st.dataframe(df, use_container_width=True)
 
             # Dropdown to select variant
-            variant_options = [v.get('tag') for v in model_data['variants']]
+            variant_options = [v.get("tag") for v in model_data["variants"]]
             selected_variant = st.selectbox(
                 "Select variant to download",
                 variant_options,
-                format_func=lambda x: f"{x} ({next((v['size'] for v in model_data['variants'] if v['tag'] == x), 'Unknown')})"
+                format_func=lambda x: f"{x} ({next((v['size'] for v in model_data['variants'] if v['tag'] == x), 'Unknown')})",
             )
 
             if st.button("Download Selected Variant", key="download_variant"):
@@ -427,8 +430,8 @@ class ModelsPage:
 
             # Fallback option to download the base model
             if st.button("Download Base Model"):
-                if model_data['name'] and model_data['name'].strip():
-                    self.pull_model(model_data['name'].strip())
+                if model_data["name"] and model_data["name"].strip():
+                    self.pull_model(model_data["name"].strip())
                 else:
                     st.error("Invalid model name")
 
@@ -474,7 +477,7 @@ class ModelsPage:
                     if os.path.exists(cache_path):
                         try:
                             os.remove(cache_path)
-                        except:
+                        except Exception:
                             pass
 
                     if st.button("Close"):
@@ -604,7 +607,7 @@ class ModelsPage:
                         st.caption(f"Tags: {model['tags']}")
 
                         # For variant count display
-                        variant_count = len(model.get('variants', []))
+                        variant_count = len(model.get("variants", []))
                         variant_text = f"{variant_count} variant{'s' if variant_count != 1 else ''}"
 
                         # Check if model is already installed
