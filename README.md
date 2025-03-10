@@ -102,4 +102,4 @@ For comprehensive documentation on the Agent System, see:
 
 ## License
 
-MIT License
+Apache License 2.0

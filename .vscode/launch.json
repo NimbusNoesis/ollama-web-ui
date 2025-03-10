@@ -5,7 +5,7 @@
       "name": "Streamlit Debug",
       "type": "debugpy",
       "request": "launch",
-      "program": "${workspaceFolder}/.venv/Lib/site-packages/streamlit/web/cli.py",
+      "program": "${workspaceFolder}/.venv/lib/python3.10/site-packages/streamlit/web/cli.py",
       "args": [
         "run",
         "${workspaceFolder}/main.py",
