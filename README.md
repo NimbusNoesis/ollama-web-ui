@@ -11,7 +11,6 @@ A user-friendly web interface for [Ollama](https://ollama.com/), built with Stre
 - Customizable system prompts
 - Temperature adjustment
 - Easy-to-use interface
-- Multi-agent system for complex tasks
 
 ## Tool Calling Support
 
@@ -66,26 +65,6 @@ def calculator(expression: str) -> dict:
 ### Try the Example
 
 Check out `app/examples/tool_usage_example.py` for a complete working example of tool calling.
-
-## Agent System
-
-The Ollama UI includes a powerful multi-agent system that enables complex workflows through collaborative problem-solving, specialized agent roles, and sophisticated task execution patterns.
-
-### Key Capabilities
-
-- Create custom agents with specialized roles
-- Organize agents into collaborative teams
-- Execute tasks using manager coordination
-- Target specific agents for focused tasks
-- Build complex reasoning chains with continuations
-- Track execution history across sessions
-- Support for DAG-based workflows
-
-### Documentation
-
-For comprehensive documentation on the Agent System, see:
-- [Agent System Overview](docs/agents/README.md) - Introduction and usage guide
-- [Agent Documentation Index](docs/agents/INDEX.md) - Complete documentation directory
 
 ## Installation
 
