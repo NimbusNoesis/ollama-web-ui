@@ -15,7 +15,6 @@ This directory contains comprehensive documentation for the Ollama Web UI Agent 
 - [FEATURE_TARGETING.md](FEATURE_TARGETING.md) - Agent targeting feature implementation details
 - [FEATURE_CONTINUATION.md](FEATURE_CONTINUATION.md) - Continuation feature refinements and capabilities
 - [FEATURE_HISTORY.md](FEATURE_HISTORY.md) - Execution history tracking implementation
-- [FEATURE_JSON_HANDLING.md](FEATURE_JSON_HANDLING.md) - JSON response handling implementation
 
 ## Guides and References
 
@@ -23,6 +22,7 @@ This directory contains comprehensive documentation for the Ollama Web UI Agent 
 - [GUIDE_VISUAL.md](GUIDE_VISUAL.md) - Visual guide to key Agent System concepts
 - [GUIDE_SYSTEM_MEMORY.md](GUIDE_SYSTEM_MEMORY.md) - Explanation of memory and history systems
 - [GUIDE_CONTINUATION.md](GUIDE_CONTINUATION.md) - Analysis of continuation workflow capabilities
+- [GUIDE_JSON_HANDLING.md](GUIDE_JSON_HANDLING.md) - JSON response handling implementation
 
 ## Document Organization
 
