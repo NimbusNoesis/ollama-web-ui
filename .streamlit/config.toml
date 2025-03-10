@@ -4,15 +4,15 @@
 gatherUsageStats = false
 
 [server]
-enableCORS = false
+enableCORS = true
 enableXsrfProtection = true
 
 [logger]
 level = "info"
 
 [theme]
-primaryColor = "#F63366"
-backgroundColor = "#FFFFFF"
-secondaryBackgroundColor = "#F0F2F6"
-textColor = "#262730"
-font = "sans serif" 
+primaryColor = "#FF4B4B"             # Bright red for primary actions
+backgroundColor = "#0E1117"          # Dark background
+secondaryBackgroundColor = "#1B1F27" # Slightly lighter background for contrast
+textColor = "#E6E6E6"               # Light grey text for readability
+font = "sans serif"
