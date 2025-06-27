@@ -319,10 +319,10 @@ def render_group_view(group: AgentGroup):
             confirm_delete = st.checkbox("Confirm group deletion")
             if confirm_delete:
                 if group in st.session_state.get("agent_groups", []):
-            st.session_state["agent_groups"].remove(group)
-            st.session_state.selected_group = None
-            save_agents()
-            st.rerun()
+                    st.session_state["agent_groups"].remove(group)
+                    st.session_state.selected_group = None
+                    save_agents()
+                    st.rerun()
 
 
 def render_task_executor(group: AgentGroup):
