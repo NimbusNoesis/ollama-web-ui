@@ -8,7 +8,11 @@ from typing import Any, Dict, List
 import pandas as pd
 import streamlit as st
 
+from app.utils.logger import get_logger
+
 from app.api.ollama_api import OllamaAPI
+
+logger = get_logger()
 
 
 class ModelsPage:
@@ -110,7 +114,7 @@ class ModelsPage:
                 json.dump(cache_data, f, indent=2)
         except Exception as e:
             # If serialization fails, log the error but continue execution
-            print(f"Error caching data: {str(e)}")
+            logger.error("Error caching data: %s", str(e))
 
     def _load_from_cache(self, cache_key: str) -> Any:
         """
@@ -182,7 +186,7 @@ class ModelsPage:
         try:
             self._save_to_cache(cache_key, model_info)
         except Exception as e:
-            print(f"Warning: Failed to cache model info: {str(e)}")
+            logger.warning("Failed to cache model info: %s", str(e))
 
         return model_info
 
@@ -211,7 +215,7 @@ class ModelsPage:
         try:
             self._save_to_cache(cache_key, results)
         except Exception as e:
-            print(f"Warning: Failed to cache search results: {str(e)}")
+            logger.warning("Failed to cache search results: %s", str(e))
 
         return results
 

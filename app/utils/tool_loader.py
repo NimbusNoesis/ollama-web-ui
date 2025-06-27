@@ -3,10 +3,9 @@
 import importlib
 import inspect
 import json
-import os
 import sys
-from typing import Any, Dict, List, Callable, Optional, Tuple, Union
-import streamlit as st
+from pathlib import Path
+from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 from app.utils.logger import get_logger
 
@@ -20,19 +19,19 @@ class ToolLoader:
     @staticmethod
     def get_tools_dir() -> str:
         """Get the absolute path to the tools directory."""
-        app_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        tools_dir = os.path.join(app_dir, "tools")
-        return tools_dir
+        app_dir = Path(__file__).resolve().parents[1]
+        tools_dir = app_dir / "tools"
+        return str(tools_dir)
 
     @staticmethod
     def ensure_tools_dir_exists() -> None:
         """Ensure the tools directory exists."""
-        tools_dir = ToolLoader.get_tools_dir()
-        if not os.path.exists(tools_dir):
-            os.makedirs(tools_dir)
+        tools_dir = Path(ToolLoader.get_tools_dir())
+        if not tools_dir.exists():
+            tools_dir.mkdir(parents=True)
             # Create an __init__.py file to make it a proper Python package
-            with open(os.path.join(tools_dir, "__init__.py"), "w") as f:
-                f.write('"""Tools package for Ollama UI."""\n')
+            init_file = tools_dir / "__init__.py"
+            init_file.write_text('"""Tools package for Ollama UI."""\n')
 
     @staticmethod
     def save_tool_implementation(tool_name: str, code: str) -> str:
@@ -47,17 +46,17 @@ class ToolLoader:
             Path to the saved file
         """
         ToolLoader.ensure_tools_dir_exists()
-        tools_dir = ToolLoader.get_tools_dir()
+        tools_dir = Path(ToolLoader.get_tools_dir())
 
         # Sanitize tool name for filename
         sanitized_name = "".join(c if c.isalnum() else "_" for c in tool_name)
-        file_path = os.path.join(tools_dir, f"{sanitized_name}.py")
+        file_path = tools_dir / f"{sanitized_name}.py"
 
-        with open(file_path, "w") as f:
+        with open(file_path, "w", encoding="utf-8") as f:
             f.write(code)
 
-        logger.info(f"Saved tool implementation to {file_path}")
-        return file_path
+        logger.info("Saved tool implementation to %s", file_path)
+        return str(file_path)
 
     @staticmethod
     def get_tool_implementation(tool_name: str) -> Optional[str]:
@@ -71,21 +70,21 @@ class ToolLoader:
             Source code of the tool implementation or None if not found
         """
         ToolLoader.ensure_tools_dir_exists()
-        tools_dir = ToolLoader.get_tools_dir()
+        tools_dir = Path(ToolLoader.get_tools_dir())
 
         # Sanitize tool name for filename
         sanitized_name = "".join(c if c.isalnum() else "_" for c in tool_name)
-        file_path = os.path.join(tools_dir, f"{sanitized_name}.py")
+        file_path = tools_dir / f"{sanitized_name}.py"
 
-        if os.path.exists(file_path):
+        if file_path.exists():
             try:
-                with open(file_path, "r") as f:
+                with open(file_path, "r", encoding="utf-8") as f:
                     return f.read()
             except Exception as e:
-                logger.error(f"Error reading tool implementation {file_path}: {str(e)}")
+                logger.error("Error reading tool implementation %s: %s", file_path, str(e))
                 return None
         else:
-            logger.warning(f"Tool implementation file not found: {file_path}")
+            logger.warning("Tool implementation file not found: %s", file_path)
             return None
 
     @staticmethod
@@ -101,17 +100,17 @@ class ToolLoader:
             Path to the saved file
         """
         ToolLoader.ensure_tools_dir_exists()
-        tools_dir = ToolLoader.get_tools_dir()
+        tools_dir = Path(ToolLoader.get_tools_dir())
 
         # Sanitize tool name for filename
         sanitized_name = "".join(c if c.isalnum() else "_" for c in tool_name)
-        file_path = os.path.join(tools_dir, f"{sanitized_name}.json")
+        file_path = tools_dir / f"{sanitized_name}.json"
 
-        with open(file_path, "w") as f:
+        with open(file_path, "w", encoding="utf-8") as f:
             json.dump(tool_definition, f, indent=2)
 
-        logger.info(f"Saved tool definition to {file_path}")
-        return file_path
+        logger.info("Saved tool definition to %s", file_path)
+        return str(file_path)
 
     @staticmethod
     def list_available_tools() -> List[str]:
@@ -122,12 +121,12 @@ class ToolLoader:
             List of tool names
         """
         ToolLoader.ensure_tools_dir_exists()
-        tools_dir = ToolLoader.get_tools_dir()
+        tools_dir = Path(ToolLoader.get_tools_dir())
 
         tool_files = [
-            os.path.splitext(f)[0]
-            for f in os.listdir(tools_dir)
-            if f.endswith(".py") and f != "__init__.py"
+            path.stem
+            for path in tools_dir.glob("*.py")
+            if path.name != "__init__.py"
         ]
 
         return tool_files
@@ -146,30 +145,30 @@ class ToolLoader:
             Tuple of (function, definition) or (None, None) if not found
         """
         ToolLoader.ensure_tools_dir_exists()
-        tools_dir = ToolLoader.get_tools_dir()
+        tools_dir = Path(ToolLoader.get_tools_dir())
 
         # Sanitize tool name for filename
         sanitized_name = "".join(c if c.isalnum() else "_" for c in tool_name)
-        py_file = os.path.join(tools_dir, f"{sanitized_name}.py")
-        json_file = os.path.join(tools_dir, f"{sanitized_name}.json")
+        py_file = tools_dir / f"{sanitized_name}.py"
+        json_file = tools_dir / f"{sanitized_name}.json"
 
         # Check if files exist
-        if not os.path.exists(py_file):
-            logger.warning(f"Tool implementation file not found: {py_file}")
+        if not py_file.exists():
+            logger.warning("Tool implementation file not found: %s", py_file)
             return None, None
 
         # Load the definition if it exists
         definition = None
-        if os.path.exists(json_file):
-            with open(json_file, "r") as f:
+        if json_file.exists():
+            with open(json_file, "r", encoding="utf-8") as f:
                 try:
                     definition = json.load(f)
                 except json.JSONDecodeError:
-                    logger.error(f"Invalid JSON in tool definition: {json_file}")
+                    logger.error("Invalid JSON in tool definition: %s", json_file)
 
         # Add the tools directory to the Python path if it's not already there
-        if tools_dir not in sys.path:
-            sys.path.append(os.path.dirname(tools_dir))  # Add app directory
+        if str(tools_dir) not in sys.path:
+            sys.path.append(str(tools_dir.parent))  # Add app directory
 
         try:
             # Import the module dynamically

@@ -1,9 +1,13 @@
 import json
-import os
-import logging
-import datetime
-from typing import List, Dict, Any, Optional, Union
+from datetime import datetime
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Union
+
 import streamlit as st
+
+from .logger import get_logger
+
+logger = get_logger()
 
 
 class ChatManager:
@@ -16,10 +20,10 @@ class ChatManager:
         Args:
             chats_dir: Directory to store chat files
         """
-        self.chats_dir = chats_dir
+        self.chats_dir = Path(chats_dir)
 
         # Create directory if it doesn't exist
-        os.makedirs(self.chats_dir, exist_ok=True)
+        self.chats_dir.mkdir(parents=True, exist_ok=True)
 
         # Initialize session state for chats if needed
         if "current_chat_id" not in st.session_state:
@@ -41,7 +45,7 @@ class ChatManager:
         Returns:
             The ID of the new chat
         """
-        chat_id = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        chat_id = datetime.now().strftime("%Y%m%d_%H%M%S")
 
         if not title:
             title = f"Chat {chat_id}"
@@ -49,8 +53,8 @@ class ChatManager:
         st.session_state.chats[chat_id] = {
             "id": chat_id,
             "title": title,
-            "created_at": datetime.datetime.now().isoformat(),
-            "updated_at": datetime.datetime.now().isoformat(),
+            "created_at": datetime.now().isoformat(),
+            "updated_at": datetime.now().isoformat(),
             "messages": [],
         }
 
@@ -73,21 +77,21 @@ class ChatManager:
             chat_id = st.session_state.current_chat_id
 
         if not chat_id or chat_id not in st.session_state.chats:
-            logging.error(f"Invalid chat ID: {chat_id}")
+            logger.error("Invalid chat ID: %s", chat_id)
             return False
 
         chat_data = st.session_state.chats[chat_id]
-        chat_data["updated_at"] = datetime.datetime.now().isoformat()
+        chat_data["updated_at"] = datetime.now().isoformat()
 
-        file_path = os.path.join(self.chats_dir, f"{chat_id}.json")
+        file_path = self.chats_dir / f"{chat_id}.json"
 
         try:
-            with open(file_path, "w") as f:
+            with open(file_path, "w", encoding="utf-8") as f:
                 json.dump(chat_data, f, indent=2)
-            logging.info(f"Saved chat {chat_id} to {file_path}")
+            logger.info("Saved chat %s to %s", chat_id, file_path)
             return True
         except Exception as e:
-            logging.error(f"Error saving chat {chat_id}: {str(e)}")
+            logger.error("Error saving chat %s: %s", chat_id, str(e))
             return False
 
     def list_saved_chats(self) -> List[Dict[str, Any]]:
@@ -100,25 +104,23 @@ class ChatManager:
         chats = []
 
         try:
-            for filename in os.listdir(self.chats_dir):
-                if filename.endswith(".json"):
-                    file_path = os.path.join(self.chats_dir, filename)
-                    try:
-                        with open(file_path, "r") as f:
-                            chat_data = json.load(f)
-                            chats.append(
-                                {
-                                    "id": chat_data.get("id"),
-                                    "title": chat_data.get("title"),
-                                    "created_at": chat_data.get("created_at"),
-                                    "updated_at": chat_data.get("updated_at"),
-                                    "message_count": len(chat_data.get("messages", [])),
-                                }
-                            )
-                    except Exception as e:
-                        logging.error(f"Error reading chat file {filename}: {str(e)}")
+            for file_path in self.chats_dir.glob("*.json"):
+                try:
+                    with open(file_path, "r", encoding="utf-8") as f:
+                        chat_data = json.load(f)
+                        chats.append(
+                            {
+                                "id": chat_data.get("id"),
+                                "title": chat_data.get("title"),
+                                "created_at": chat_data.get("created_at"),
+                                "updated_at": chat_data.get("updated_at"),
+                                "message_count": len(chat_data.get("messages", [])),
+                            }
+                        )
+                except Exception as e:
+                    logger.error("Error reading chat file %s: %s", file_path.name, str(e))
         except Exception as e:
-            logging.error(f"Error listing chats: {str(e)}")
+            logger.error("Error listing chats: %s", str(e))
 
         # Sort by updated_at descending
         chats.sort(key=lambda x: x.get("updated_at", ""), reverse=True)
@@ -135,20 +137,20 @@ class ChatManager:
         Returns:
             True if successful, False otherwise
         """
-        file_path = os.path.join(self.chats_dir, f"{chat_id}.json")
+        file_path = self.chats_dir / f"{chat_id}.json"
 
         try:
-            with open(file_path, "r") as f:
+            with open(file_path, "r", encoding="utf-8") as f:
                 chat_data = json.load(f)
 
             st.session_state.chats[chat_id] = chat_data
             st.session_state.current_chat_id = chat_id
             st.session_state.chat_history = chat_data.get("messages", [])
 
-            logging.info(f"Loaded chat {chat_id} from {file_path}")
+            logger.info("Loaded chat %s from %s", chat_id, file_path)
             return True
         except Exception as e:
-            logging.error(f"Error loading chat {chat_id}: {str(e)}")
+            logger.error("Error loading chat %s: %s", chat_id, str(e))
             return False
 
     def delete_chat(self, chat_id: str) -> bool:
@@ -161,7 +163,7 @@ class ChatManager:
         Returns:
             True if successful, False otherwise
         """
-        file_path = os.path.join(self.chats_dir, f"{chat_id}.json")
+        file_path = self.chats_dir / f"{chat_id}.json"
 
         try:
             # Remove from memory
@@ -174,13 +176,13 @@ class ChatManager:
                 st.session_state.chat_history = []
 
             # Remove file
-            if os.path.exists(file_path):
-                os.remove(file_path)
+            if file_path.exists():
+                file_path.unlink()
 
-            logging.info(f"Deleted chat {chat_id}")
+            logger.info("Deleted chat %s", chat_id)
             return True
         except Exception as e:
-            logging.error(f"Error deleting chat {chat_id}: {str(e)}")
+            logger.error("Error deleting chat %s: %s", chat_id, str(e))
             return False
 
     def add_message(
@@ -205,13 +207,13 @@ class ChatManager:
             chat_id = self.create_new_chat()
 
         if chat_id not in st.session_state.chats:
-            logging.error(f"Invalid chat ID: {chat_id}")
+            logger.error("Invalid chat ID: %s", chat_id)
             return False
 
         message = {
             "role": role,
             "content": content,
-            "timestamp": datetime.datetime.now().isoformat(),
+            "timestamp": datetime.now().isoformat(),
         }
 
         # Add to in-memory chat
@@ -221,7 +223,7 @@ class ChatManager:
         # Update timestamp
         st.session_state.chats[chat_id][
             "updated_at"
-        ] = datetime.datetime.now().isoformat()
+        ] = datetime.now().isoformat()
 
         # Auto-save chat
         self.save_chat(chat_id)
@@ -290,12 +292,12 @@ class ChatManager:
             chat_id = self.create_new_chat()
 
         if chat_id not in st.session_state.chats:
-            logging.error(f"Invalid chat ID: {chat_id}")
+            logger.error("Invalid chat ID: %s", chat_id)
             return False
 
         # Add timestamp if not present
         if "timestamp" not in message:
-            message["timestamp"] = datetime.datetime.now().isoformat()
+            message["timestamp"] = datetime.now().isoformat()
 
         # Add to in-memory chat
         st.session_state.chats[chat_id]["messages"].append(message)
@@ -304,7 +306,7 @@ class ChatManager:
         # Update timestamp
         st.session_state.chats[chat_id][
             "updated_at"
-        ] = datetime.datetime.now().isoformat()
+        ] = datetime.now().isoformat()
 
         # Auto-save chat
         self.save_chat(chat_id)
@@ -329,15 +331,15 @@ class ChatManager:
             chat_id = self.create_new_chat()
 
         if chat_id not in st.session_state.chats:
-            logging.error(f"Invalid chat ID: {chat_id}")
+            logger.error("Invalid chat ID: %s", chat_id)
             return ""
 
         # Create a placeholder message
-        message_id = f"stream_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}"
+        message_id = f"stream_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
         message = {
             "role": "assistant",
             "content": "",  # Start empty
-            "timestamp": datetime.datetime.now().isoformat(),
+            "timestamp": datetime.now().isoformat(),
             "id": message_id,
             "is_streaming": True,
         }
@@ -349,7 +351,7 @@ class ChatManager:
         # Update timestamp
         st.session_state.chats[chat_id][
             "updated_at"
-        ] = datetime.datetime.now().isoformat()
+        ] = datetime.now().isoformat()
 
         return message_id
 
@@ -371,11 +373,11 @@ class ChatManager:
             chat_id = st.session_state.current_chat_id
 
         if not chat_id:
-            logging.error("No active chat found")
+            logger.error("No active chat found")
             return False
 
         if chat_id not in st.session_state.chats:
-            logging.error(f"Invalid chat ID: {chat_id}")
+            logger.error("Invalid chat ID: %s", chat_id)
             return False
 
         # Find the message by ID
@@ -401,5 +403,5 @@ class ChatManager:
             self.save_chat(chat_id)
             return True
         else:
-            logging.error(f"Message with ID {message_id} not found in chat {chat_id}")
+            logger.error("Message with ID %s not found in chat %s", message_id, chat_id)
             return False

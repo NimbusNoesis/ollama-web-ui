@@ -1,21 +1,22 @@
 import logging
-import os
 import sys
 import traceback
+import os
 from datetime import datetime
 from functools import wraps
+from pathlib import Path
 from typing import Any, Callable, Dict, Optional, Type, TypeVar, cast
 
 # Type variable for the decorator
 F = TypeVar("F", bound=Callable[..., Any])
 
 # Create logs directory if it doesn't exist
-LOGS_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data", "logs")
-os.makedirs(LOGS_DIR, exist_ok=True)
+LOGS_DIR = Path(__file__).resolve().parents[1] / "data" / "logs"
+LOGS_DIR.mkdir(parents=True, exist_ok=True)
 
 # Configure log file path with timestamp
-LOG_FILENAME = f"ollama_ui_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
-LOG_FILE_PATH = os.path.join(LOGS_DIR, LOG_FILENAME)
+LOG_FILENAME = f"ollama_ui_{datetime.now():%Y%m%d_%H%M%S}.log"
+LOG_FILE_PATH = LOGS_DIR / LOG_FILENAME
 
 # Get log level from environment variable (default to INFO if not set)
 LOG_LEVEL_ENV = os.environ.get("OLLAMA_UI_LOG_LEVEL", "INFO").upper()
