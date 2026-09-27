@@ -9,6 +9,7 @@ from app.utils.agents.ui_components import (
     render_group_view,
     render_task_executor,
     load_agents,
+    save_agents,
 )
 
 # Get application logger
@@ -184,13 +185,14 @@ class AgentsPage:
                                         st.session_state.editing_agent = agent
                                         st.session_state.editing_agent_original_group = st.session_state.selected_group
                                 with col2:
-                                    if st.button("Delete Agent", key=f"delete_{agent.id}"):
-                                        confirm_delete = st.checkbox("Confirm deletion", key=f"confirm_{agent.id}")
-                                        if confirm_delete:
-                                            st.session_state.selected_group.agents = [a for a in st.session_state.selected_group.agents if a.id != agent.id]
-                                            load_agents()
-                                            st.success(f"Agent {agent.name} deleted!")
-                                            st.rerun()
+                                    # The checkbox must exist before the click: one created in the
+                                    # button's branch only renders on that rerun and can't be ticked.
+                                    confirm_delete = st.checkbox("Confirm deletion", key=f"confirm_{agent.id}")
+                                    if st.button("Delete Agent", key=f"delete_{agent.id}", disabled=not confirm_delete):
+                                        st.session_state.selected_group.agents = [a for a in st.session_state.selected_group.agents if a.id != agent.id]
+                                        save_agents()
+                                        st.success(f"Agent {agent.name} deleted!")
+                                        st.rerun()
                         
                         # Display shared memory
                         if st.session_state.selected_group.shared_memory:
@@ -211,14 +213,14 @@ class AgentsPage:
                                 ) or {}
                                 st.rerun()
                         with col2:
-                            if st.button("Delete Group"):
-                                confirm_delete = st.checkbox("Confirm group deletion")
-                                if confirm_delete:
-                                    st.session_state.agent_groups = [g for g in st.session_state.agent_groups if g.id != st.session_state.selected_group.id]
-                                    st.session_state.selected_group = None
-                                    load_agents()
-                                    st.success(f"Group {group_name} deleted!")
-                                    st.rerun()
+                            confirm_delete = st.checkbox(
+                                "Confirm group deletion", key=f"confirm_group_{st.session_state.selected_group.id}")
+                            if st.button("Delete Group", disabled=not confirm_delete):
+                                st.session_state.agent_groups = [g for g in st.session_state.agent_groups if g.id != st.session_state.selected_group.id]
+                                st.session_state.selected_group = None
+                                save_agents()
+                                st.success(f"Group {group_name} deleted!")
+                                st.rerun()
                                     
                         logger.debug(f"Successfully rendered group details for {group_name}")
                     except Exception as e:
