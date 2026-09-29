@@ -500,18 +500,18 @@ def render_task_executor(group: AgentGroup):
                     with st.spinner("Manager processing task..."):
                         result = group.execute_task_with_manager(task)
 
-                        # Store in session state for continuation with history ID
-                        history_id = str(uuid.uuid4())
-                        st.session_state.agent_execution_results = {
-                            "type": "manager",
-                            "task": task,
-                            "result": result,
-                            "timestamp": datetime.now().isoformat(),
-                            "history_id": history_id
-                        }
+                    # Store in session state for continuation with history ID
+                    history_id = str(uuid.uuid4())
+                    st.session_state.agent_execution_results = {
+                        "type": "manager",
+                        "task": task,
+                        "result": result,
+                        "timestamp": datetime.now().isoformat(),
+                        "history_id": history_id
+                    }
                     
-                        # Display results
-                        display_manager_results(result)
+                    # Display results
+                    display_manager_results(result)
             
             with exec_tab2:
                 # Agent selection
@@ -1129,9 +1129,9 @@ def execute_task_with_directives(group: AgentGroup, task: str, directives: Dict[
         agent = next((a for a in group.agents if a.name == agent_name), None)
         if not agent:
             combined_results.append({
-                    "agent": agent_name,
-                    "result": {
-                        "status": "error", 
+                "agent": agent_name,
+                "result": {
+                    "status": "error", 
                     "message": f"Agent '{agent_name}' not found in group '{group.name}'"
                 }
             })
@@ -1431,10 +1431,10 @@ def get_continuation_chain(group: AgentGroup, entry_id: str) -> List[Dict[str, A
     children = [e for e in group.execution_history if e.get("parent_id") == entry_id]
     for child in children:
         child_chain = get_continuation_chain(group, child.get("id"))
-    # Add children at the end
-    for child_entry in child_chain:
-        if child_entry not in chain:
-            chain.append(child_entry)
+        # Add children at the end
+        for child_entry in child_chain:
+            if child_entry not in chain:
+                chain.append(child_entry)
     
     return chain
 
@@ -1508,9 +1508,9 @@ def execute_with_multiple_agents(group: AgentGroup, task: str, agent_names: List
         agent = next((a for a in group.agents if a.name == agent_name), None)
         if not agent:
             combined_results.append({
-                    "agent": agent_name,
-                    "result": {
-                        "status": "error", 
+                "agent": agent_name,
+                "result": {
+                    "status": "error", 
                     "message": f"Agent '{agent_name}' not found in group '{group.name}'"
                 }
             })
