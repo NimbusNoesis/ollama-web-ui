@@ -916,16 +916,21 @@ def display_directive_results(result: Dict[str, Any], directives: Dict[str, str]
             st.markdown("---")
 
 
-def load_agents():
-    """Load saved agent groups from disk"""
-    logger.info("Loading agent groups from disk")
-
-    data_dir = os.path.join(
+def agents_data_dir():
+    """Directory holding agent_groups.json (a function so tests can point it elsewhere)."""
+    return os.path.join(
         os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__)))),
         "app",
         "data",
         "agents",
     )
+
+
+def load_agents():
+    """Load saved agent groups from disk"""
+    logger.info("Loading agent groups from disk")
+
+    data_dir = agents_data_dir()
     os.makedirs(data_dir, exist_ok=True)
     logger.info(f"Agent data directory: {data_dir}")
 
@@ -971,12 +976,7 @@ def save_agents():
     """Save agent groups to disk"""
     logger.info("Saving agent groups to disk")
 
-    data_dir = os.path.join(
-        os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__)))),
-        "app",
-        "data",
-        "agents",
-    )
+    data_dir = agents_data_dir()
 
     try:
         # Ensure directory exists
