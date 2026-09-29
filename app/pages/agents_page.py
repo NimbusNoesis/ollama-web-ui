@@ -189,10 +189,15 @@ class AgentsPage:
                                     # button's branch only renders on that rerun and can't be ticked.
                                     confirm_delete = st.checkbox("Confirm deletion", key=f"confirm_{agent.id}")
                                     if st.button("Delete Agent", key=f"delete_{agent.id}", disabled=not confirm_delete):
-                                        st.session_state.selected_group.agents = [a for a in st.session_state.selected_group.agents if a.id != agent.id]
-                                        save_agents()
-                                        st.success(f"Agent {agent.name} deleted!")
-                                        st.rerun()
+                                        group = st.session_state.selected_group
+                                        previous_agents = group.agents
+                                        group.agents = [a for a in previous_agents if a.id != agent.id]
+                                        if save_agents():
+                                            st.success(f"Agent {agent.name} deleted!")
+                                            st.rerun()
+                                        else:
+                                            group.agents = previous_agents
+                                            st.error(f"Could not delete agent {agent.name}: saving failed (see logs).")
                         
                         # Display shared memory
                         if st.session_state.selected_group.shared_memory:
@@ -216,11 +221,17 @@ class AgentsPage:
                             confirm_delete = st.checkbox(
                                 "Confirm group deletion", key=f"confirm_group_{st.session_state.selected_group.id}")
                             if st.button("Delete Group", disabled=not confirm_delete):
-                                st.session_state.agent_groups = [g for g in st.session_state.agent_groups if g.id != st.session_state.selected_group.id]
+                                previous_groups = st.session_state.agent_groups
+                                previous_selected = st.session_state.selected_group
+                                st.session_state.agent_groups = [g for g in previous_groups if g.id != previous_selected.id]
                                 st.session_state.selected_group = None
-                                save_agents()
-                                st.success(f"Group {group_name} deleted!")
-                                st.rerun()
+                                if save_agents():
+                                    st.success(f"Group {group_name} deleted!")
+                                    st.rerun()
+                                else:
+                                    st.session_state.agent_groups = previous_groups
+                                    st.session_state.selected_group = previous_selected
+                                    st.error(f"Could not delete group {group_name}: saving failed (see logs).")
                                     
                         logger.debug(f"Successfully rendered group details for {group_name}")
                     except Exception as e:
