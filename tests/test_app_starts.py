@@ -1,7 +1,9 @@
 """Smoke test: the app starts and every sidebar page renders without an exception.
 
-Run: pip install pytest && python -m pytest tests/ -q
-(No Ollama server needed — pages only call it on user actions.)
+Run: pip install -r requirements.txt pytest && python -m pytest tests/ -q
+No Ollama server needed: tests/conftest.py stubs the ollama module (some pages
+list models while rendering). Scope is startup and navigation only; errors a
+page catches and shows with st.error are checked too, not just exceptions.
 """
 import os
 
@@ -19,3 +21,4 @@ def test_app_starts_and_every_page_renders():
         assert nav, f"no '{label}' button in the sidebar"
         nav[0].click().run()
         assert not at.exception, (label, [e.value for e in at.exception])
+        assert not at.error, (label, [e.value for e in at.error])
