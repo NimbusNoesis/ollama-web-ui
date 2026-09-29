@@ -1405,38 +1405,38 @@ def render_execution_history(group: AgentGroup):
 
 
 def get_continuation_chain(group: AgentGroup, entry_id: str) -> List[Dict[str, Any]]:
-    """Get all entries in a continuation chain, including parents and children."""
-    chain = []
-    
-    # Find the entry
-    entry = next((e for e in group.execution_history if e.get("id") == entry_id), None)
+    """Get the continuation chain of an entry: its ancestors (oldest first), the
+    entry itself, then its descendants (depth-first, in history order)."""
+    history = group.execution_history
+    by_id = {e.get("id"): e for e in history if e.get("id") is not None}
+    entry = by_id.get(entry_id)
     if not entry:
-        return chain
-    
-    # Add the entry
-    chain.append(entry)
-    
-    # Recursively add parents
+        return []
+
+    # `seen` guards against parent_id cycles in saved history
+    seen = {entry_id}
+
+    # Walk up to the root
+    ancestors = []
     parent_id = entry.get("parent_id")
-    if parent_id:
-        parent_entry = next((e for e in group.execution_history if e.get("id") == parent_id), None)
-        if parent_entry:
-            parent_chain = get_continuation_chain(group, parent_id)
-            # Add parents at the start
-            for parent in parent_chain:
-                if parent not in chain:
-                    chain.insert(0, parent)
-    
-    # Add children
-    children = [e for e in group.execution_history if e.get("parent_id") == entry_id]
-    for child in children:
-        child_chain = get_continuation_chain(group, child.get("id"))
-        # Add children at the end
-        for child_entry in child_chain:
-            if child_entry not in chain:
-                chain.append(child_entry)
-    
-    return chain
+    while parent_id in by_id and parent_id not in seen:
+        seen.add(parent_id)
+        ancestors.insert(0, by_id[parent_id])
+        parent_id = by_id[parent_id].get("parent_id")
+
+    # Walk down through the children
+    descendants = []
+
+    def add_children(parent: str):
+        for child in history:
+            child_id = child.get("id")
+            if child.get("parent_id") == parent and child_id is not None and child_id not in seen:
+                seen.add(child_id)
+                descendants.append(child)
+                add_children(child_id)
+
+    add_children(entry_id)
+    return ancestors + [entry] + descendants
 
 
 def prepare_continuation_from_history(history_entry: Dict[str, Any]):
